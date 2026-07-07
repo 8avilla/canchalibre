@@ -22,7 +22,11 @@ export function DateJumpInput({
       <span>📅</span>
       <input
         type="date"
-        defaultValue={selectedDateIso}
+        // Controlado (no defaultValue): si el cliente elige un día en la franja de DaySelector, la
+        // navegación es del lado del cliente y este componente no se vuelve a montar — con
+        // defaultValue el calendario se quedaría mostrando la fecha vieja, desincronizado de la
+        // franja de días.
+        value={selectedDateIso}
         onChange={(e) => {
           if (e.target.value) {
             router.push(`/${orgSlug}/${venueId}?date=${e.target.value}`);
