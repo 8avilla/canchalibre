@@ -54,12 +54,21 @@ export async function createVenue(formData: FormData): Promise<void> {
   redirect(`/${parsed.data.orgSlug}/admin/canchas`);
 }
 
+const urlLines = z.string().transform((value) =>
+  value
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0),
+);
+
 const updateVenueSchema = z.object({
   orgSlug: z.string().min(1),
   venueId: z.string().min(1),
   hourlyRate: z.coerce.number().int().min(0),
-  imageUrl: z.string().trim().url().optional().or(z.literal("")),
-  capacity: z.coerce.number().int().min(0).optional().or(z.literal("").transform(() => undefined)),
+  imageUrls: urlLines.pipe(z.array(z.string().url())),
+  // El orden importa: Number("") es 0 (no NaN), así que si coerce.number() fuera la primera rama,
+  // un campo vacío se guardaría como capacity=0 en vez de quedar sin definir.
+  capacity: z.literal("").transform(() => undefined).or(z.coerce.number().int().min(0)),
   active: z.enum(["true", "false"]),
 });
 
@@ -68,7 +77,7 @@ export async function updateVenue(formData: FormData): Promise<void> {
     orgSlug: formData.get("orgSlug"),
     venueId: formData.get("venueId"),
     hourlyRate: formData.get("hourlyRate"),
-    imageUrl: formData.get("imageUrl"),
+    imageUrls: formData.get("imageUrls") ?? "",
     capacity: formData.get("capacity"),
     active: formData.get("active"),
   });
@@ -82,7 +91,7 @@ export async function updateVenue(formData: FormData): Promise<void> {
     where: { id: parsed.data.venueId },
     data: {
       hourlyRate: parsed.data.hourlyRate,
-      imageUrl: parsed.data.imageUrl || null,
+      imageUrls: parsed.data.imageUrls,
       capacity: parsed.data.capacity ?? null,
       active: parsed.data.active === "true",
     },
@@ -388,6 +397,8 @@ const createRecurringBookingSchema = z.object({
   endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   startTime: z.string().regex(/^\d{2}:\d{2}$/),
   endTime: z.string().regex(/^\d{2}:\d{2}$/),
+  // Checkbox HTML: presente ("on") solo si el admin la marcó, ausente si no.
+  requiresDeposit: z.literal("on").optional(),
 });
 
 // Todas las fechas semanales entre startDate y endDate (ambas inclusive), comparadas como string
@@ -403,10 +414,10 @@ function buildWeeklyOccurrenceDates(startDate: string, endDate: string): string[
 }
 
 // Crea una reserva recurrente semanal (ej. "cliente fijo todos los martes 6pm"): el admin la
-// confirma directo, sin abono ni paso de pago (negocio.md — clientes fijos pagan en cancha como
-// siempre). Genera de una sola vez todas las ocurrencias entre startDate y endDate; si cualquiera
-// choca con un turno ya ocupado, no crea nada de la serie (el admin debe resolver el conflicto
-// primero, ver decisión de producto).
+// confirma directo, sin paso de pago online — el abono (si aplica) se cobra en persona y el admin
+// decide al crear la serie si esta reserva lo requiere o no. Genera de una sola vez todas las
+// ocurrencias entre startDate y endDate; si cualquiera choca con un turno ya ocupado, no crea nada
+// de la serie (el admin debe resolver el conflicto primero, ver decisión de producto).
 export async function createRecurringBooking(formData: FormData): Promise<void> {
   const parsed = createRecurringBookingSchema.safeParse({
     orgSlug: formData.get("orgSlug"),
@@ -417,12 +428,14 @@ export async function createRecurringBooking(formData: FormData): Promise<void> 
     endDate: formData.get("endDate"),
     startTime: formData.get("startTime"),
     endTime: formData.get("endTime"),
+    requiresDeposit: formData.get("requiresDeposit") ?? undefined,
   });
   if (!parsed.success) {
     notFound();
   }
 
-  const { orgSlug, venueId, customerName, customerPhone, startDate, endDate, startTime, endTime } = parsed.data;
+  const { orgSlug, venueId, customerName, customerPhone, startDate, endDate, startTime, endTime, requiresDeposit } =
+    parsed.data;
 
   await requireAdminSession(orgSlug);
 
@@ -444,6 +457,8 @@ export async function createRecurringBooking(formData: FormData): Promise<void> 
   if (!venue || venue.orgId !== org.id || !venue.active) {
     notFound();
   }
+
+  const depositAmount = requiresDeposit ? Math.round((venue.hourlyRate * org.depositPercentage) / 100) : 0;
 
   try {
     await db.$transaction(async (tx) => {
@@ -475,7 +490,7 @@ export async function createRecurringBooking(formData: FormData): Promise<void> 
             status: BookingStatus.CONFIRMADA,
             blockingSlotKey: computeBlockingSlotKey(venue.id, dateObj, startTime),
             totalAmount: venue.hourlyRate,
-            depositAmount: 0,
+            depositAmount,
           },
         });
       }

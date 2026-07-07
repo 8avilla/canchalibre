@@ -157,7 +157,8 @@ model Venue {
   name       String
   type       VenueType
   hourlyRate Int
-  imageUrl   String?
+  imageUrl   String? // legado: foto única, queda solo como fallback de lectura para canchas viejas
+  imageUrls  String[] @default([])
   capacity   Int?
   active     Boolean   @default(true)
 

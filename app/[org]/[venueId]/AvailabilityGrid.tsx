@@ -13,11 +13,20 @@ const GROUPS: { label: string; icon: string; test: (hour: number) => boolean }[]
   { label: "Noche", icon: "🌙", test: (h) => h >= 18 },
 ];
 
+// Formato corto 12h sin ceros ("15:00" -> "3:00") para que el rango completo ("3:00 - 4:00") quepa
+// en una sola línea dentro de las columnas angostas — Mañana/Tarde/Noche ya distinguen am/pm, así
+// que no hace falta repetirlo ni usar el formato de 24h más largo que el resto del flujo.
+function formatHourShort(time: string): string {
+  const [hh, mm] = time.split(":");
+  const hour12 = Number(hh) % 12 || 12;
+  return `${hour12}:${mm}`;
+}
+
 function groupSlots(slots: HourSlot[]) {
   return GROUPS.map((group) => ({
     ...group,
     slots: slots.filter((slot) => group.test(Number(slot.startTime.slice(0, 2)))),
-  })).filter((group) => group.slots.length > 0);
+  }));
 }
 
 // Sincronización en vivo (Fase 5): sondea cada pocos segundos en vez de Change Streams de Mongo —
@@ -80,27 +89,32 @@ export function AvailabilityGrid({
           <p className="text-gray-400">Prueba otra fecha arriba ☝️</p>
         </div>
       ) : (
-        <div className="mt-3 grid gap-4">
+        <div className="mt-3 grid grid-cols-3 gap-2">
           {groups.map((group) => (
             <div key={group.label}>
-              <h3 className="text-sm font-medium text-gray-700">
-                {group.icon} {group.label}
+              <h3 className="text-center text-sm font-medium text-gray-700">
+                <span aria-hidden="true">{group.icon}</span> {group.label}
               </h3>
-              <div className="mt-2 grid grid-cols-3 gap-2 sm:grid-cols-4">
+              <div className="mt-2 grid gap-2">
+                {group.slots.length === 0 && (
+                  <span className="py-3 text-center text-xs text-gray-300">—</span>
+                )}
                 {group.slots.map((slot) => {
                   const isSelected = selected?.startTime === slot.startTime;
+
+                  const rangeLabel = `${formatHourShort(slot.startTime)} - ${formatHourShort(slot.endTime)}`;
 
                   if (!slot.available) {
                     return (
                       <span
                         key={slot.startTime}
-                        className={`rounded-lg border py-3 text-center text-sm ${
+                        className={`rounded-lg border py-3 text-center text-xs whitespace-nowrap ${
                           slot.blockedReason === "mantenimiento"
                             ? "border-amber-200 bg-amber-50 text-amber-600"
                             : "border-gray-100 bg-gray-50 text-gray-300 line-through"
                         }`}
                       >
-                        {slot.startTime}
+                        {rangeLabel}
                       </span>
                     );
                   }
@@ -110,13 +124,13 @@ export function AvailabilityGrid({
                       key={slot.startTime}
                       type="button"
                       onClick={() => setSelected(slot)}
-                      className={`rounded-lg border py-3 text-center text-sm font-medium transition-colors ${
+                      className={`rounded-lg border py-3 text-center text-xs font-medium whitespace-nowrap transition-colors ${
                         isSelected
                           ? "border-blue-600 bg-blue-600 text-white"
                           : "border-emerald-200 bg-emerald-50 text-emerald-800 hover:border-emerald-500 hover:bg-emerald-100"
                       }`}
                     >
-                      {slot.startTime}
+                      {rangeLabel}
                     </button>
                   );
                 })}

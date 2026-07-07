@@ -6,6 +6,7 @@ import { buildCheckoutPayload, isBoldConfigured } from "@/lib/payments/bold";
 import { uploadManualReceipt } from "@/lib/booking/actions";
 import { BookingStatus } from "@/lib/booking/state-machine";
 import { formatBusinessDayLabel } from "@/lib/time/business-day";
+import { ORG_MAPS_LINK } from "@/lib/org/maps";
 import { SubmitButton } from "@/app/components/SubmitButton";
 import { BoldButton } from "@/app/components/BoldButton";
 import { VenueSummaryCard } from "@/app/components/VenueSummaryCard";
@@ -16,6 +17,7 @@ import { StatusWatcher } from "./StatusWatcher";
 const ERROR_MESSAGES: Record<string, string> = {
   comprobante_requerido: "Debes adjuntar el comprobante de pago.",
   demasiados_intentos: "Demasiados intentos seguidos. Espera unos minutos y vuelve a intentarlo.",
+  datos_incompletos: "Completa tu nombre y WhatsApp antes de subir el comprobante.",
 };
 
 const PAYMENT_METHOD_LABEL: Record<string, string> = {
@@ -76,6 +78,7 @@ export default async function ReservaPage({
             month={month}
             startTime={booking.startTime}
             endTime={booking.endTime}
+            mapsLink={ORG_MAPS_LINK[orgSlug]}
           />
         )}
       </div>

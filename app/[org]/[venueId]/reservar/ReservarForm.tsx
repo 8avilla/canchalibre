@@ -11,7 +11,7 @@ import {
   uploadManualReceipt,
   type CreateBookingResult,
 } from "@/lib/booking/actions";
-import { isContactComplete } from "@/lib/booking/state-machine";
+import { isContactComplete, isValidCustomerName, isValidCustomerPhone } from "@/lib/booking/state-machine";
 import { SubmitButton } from "@/app/components/SubmitButton";
 import { BoldButton } from "@/app/components/BoldButton";
 
@@ -19,14 +19,19 @@ const fetcher = (url: string) => fetch(url).then((res) => res.json());
 
 function IconInput({
   icon,
+  invalid,
   ...props
-}: { icon: string } & React.InputHTMLAttributes<HTMLInputElement>) {
+}: { icon: string; invalid?: boolean } & React.InputHTMLAttributes<HTMLInputElement>) {
   return (
     <div className="relative">
       <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">{icon}</span>
       <input
         {...props}
-        className="w-full rounded-md border border-gray-300 py-3 pl-10 pr-3 text-base focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+        className={`w-full rounded-md border py-3 pl-10 pr-3 text-base focus:outline-none focus:ring-1 ${
+          invalid
+            ? "border-red-300 focus:border-red-500 focus:ring-red-500"
+            : "border-gray-300 focus:border-emerald-500 focus:ring-emerald-500"
+        }`}
       />
     </div>
   );
@@ -62,6 +67,8 @@ export function ReservarForm({
   const [loading, setLoading] = useState(true);
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
+  const [nameTouched, setNameTouched] = useState(false);
+  const [phoneTouched, setPhoneTouched] = useState(false);
   const [showHint, setShowHint] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -177,27 +184,44 @@ export function ReservarForm({
   }
 
   const remainder = shell.totalAmount - shell.depositAmount;
+  const nameValid = isValidCustomerName(customerName);
+  const phoneValid = isValidCustomerPhone(customerPhone);
   const contactComplete = isContactComplete(customerName, customerPhone);
 
   return (
     <div className="mt-6">
       <h2 className="text-sm font-medium text-gray-700">Tus datos</h2>
       <div className="mt-3 grid gap-3">
-        <IconInput
-          icon="👤"
-          value={customerName}
-          onChange={(e) => setCustomerName(e.target.value)}
-          minLength={2}
-          placeholder="Nombre completo"
-        />
-        <IconInput
-          icon="💬"
-          value={customerPhone}
-          onChange={(e) => setCustomerPhone(e.target.value)}
-          type="tel"
-          minLength={7}
-          placeholder="WhatsApp"
-        />
+        <div>
+          <IconInput
+            icon="👤"
+            value={customerName}
+            onChange={(e) => setCustomerName(e.target.value)}
+            onBlur={() => setNameTouched(true)}
+            invalid={nameTouched && customerName.length > 0 && !nameValid}
+            placeholder="Nombre completo"
+          />
+          {nameTouched && customerName.length > 0 && !nameValid && (
+            <p className="mt-1 text-xs text-red-600">Escribe al menos 3 letras, sin números ni símbolos.</p>
+          )}
+        </div>
+        <div>
+          <IconInput
+            icon="💬"
+            value={customerPhone}
+            onChange={(e) => setCustomerPhone(e.target.value.replace(/\D/g, "").slice(0, 10))}
+            onBlur={() => setPhoneTouched(true)}
+            invalid={phoneTouched && customerPhone.length > 0 && !phoneValid}
+            type="tel"
+            inputMode="numeric"
+            placeholder="WhatsApp (10 dígitos)"
+          />
+          {phoneTouched && customerPhone.length > 0 && !phoneValid && (
+            <p className="mt-1 text-xs text-red-600">
+              El número debe tener 10 dígitos ({customerPhone.length}/10).
+            </p>
+          )}
+        </div>
       </div>
 
       <div className="mt-4 rounded-xl border border-gray-200 p-4">
@@ -223,17 +247,15 @@ export function ReservarForm({
       <div className="mt-4">
         {shell.boldPayload ? (
           <>
-            <div className="relative">
-              <BoldButton payload={shell.boldPayload} />
-              {!contactComplete && (
-                <button
-                  type="button"
-                  onClick={() => setShowHint(true)}
-                  aria-label="Completa tus datos para pagar"
-                  className="absolute inset-0 cursor-pointer rounded-full"
-                />
-              )}
-            </div>
+            <BoldButton
+              payload={shell.boldPayload}
+              disabled={!contactComplete}
+              onDisabledClick={() => {
+                setShowHint(true);
+                setNameTouched(true);
+                setPhoneTouched(true);
+              }}
+            />
             {showHint && !contactComplete && (
               <p className="mt-2 text-center text-xs text-amber-700">
                 Completa tu nombre y WhatsApp arriba para poder pagar.

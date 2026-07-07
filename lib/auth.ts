@@ -9,6 +9,10 @@ export const {
   signIn,
   signOut,
 } = NextAuth({
+  // Sin esto, Auth.js v5 rechaza el request con "UntrustedHost" (se ve para el usuario como el 500
+  // genérico "There was a problem with the server configuration") en cualquier host que no sea
+  // Vercel — necesario aquí porque se despliega detrás del proxy/dominio custom de Blastic.
+  trustHost: true,
   session: { strategy: "jwt" },
   pages: { signIn: "/login" },
   providers: [

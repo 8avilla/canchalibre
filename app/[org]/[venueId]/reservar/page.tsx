@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
 import { formatBusinessDayLabel } from "@/lib/time/business-day";
+import { ORG_MAPS_LINK } from "@/lib/org/maps";
 import { VenueSummaryCard } from "@/app/components/VenueSummaryCard";
 import { ReservarForm } from "./ReservarForm";
 
@@ -45,7 +46,15 @@ export default async function ReservarPage({
       </div>
 
       <div className="mt-4">
-        <VenueSummaryCard venue={venue} weekday={weekday} day={day} month={month} startTime={start} endTime={end} />
+        <VenueSummaryCard
+          venue={venue}
+          weekday={weekday}
+          day={day}
+          month={month}
+          startTime={start}
+          endTime={end}
+          mapsLink={ORG_MAPS_LINK[orgSlug]}
+        />
       </div>
 
       <ReservarForm orgSlug={orgSlug} venueId={venue.id} date={date} start={start} end={end} />

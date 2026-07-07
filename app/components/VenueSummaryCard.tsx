@@ -1,3 +1,5 @@
+import { getVenuePhotos } from "@/lib/venues/photos";
+
 const VENUE_TYPE_LABEL: Record<string, string> = {
   FUTBOL_5: "Fútbol 5",
   FUTBOL_8: "Fútbol 8",
@@ -19,20 +21,31 @@ export function VenueSummaryCard({
   month,
   startTime,
   endTime,
+  mapsLink,
 }: {
-  venue: { name: string; type: string; hourlyRate: number; imageUrl: string | null; capacity?: number | null };
+  venue: {
+    name: string;
+    type: string;
+    hourlyRate: number;
+    imageUrl: string | null;
+    imageUrls?: string[];
+    capacity?: number | null;
+  };
   weekday: string;
   day: string;
   month: string;
   startTime: string;
   endTime: string;
+  mapsLink?: string;
 }) {
+  const [coverPhoto] = getVenuePhotos(venue);
+
   return (
     <div className="overflow-hidden rounded-xl border border-gray-200">
       <div className="flex h-36 items-center justify-center bg-gray-100">
-        {venue.imageUrl ? (
+        {coverPhoto ? (
           // eslint-disable-next-line @next/next/no-img-element -- foto externa arbitraria pegada por el admin
-          <img src={venue.imageUrl} alt="" className="h-full w-full object-cover" />
+          <img src={coverPhoto} alt="" className="h-full w-full object-cover" />
         ) : (
           <span className="text-5xl">{VENUE_TYPE_ICON[venue.type] ?? "🏟️"}</span>
         )}
@@ -45,9 +58,21 @@ export function VenueSummaryCard({
         <div className="mt-2 text-lg font-semibold text-gray-900">{venue.name}</div>
 
         <div className="mt-3 grid gap-2 border-t border-gray-100 pt-3 text-sm text-gray-700">
-          <div className="flex items-center gap-2">
-            <span>📅</span>
-            {weekday} {day} de {month}
+          <div className="flex items-center justify-between gap-2">
+            <span className="flex items-center gap-2">
+              <span>📅</span>
+              {weekday} {day} de {month}
+            </span>
+            {mapsLink && (
+              <a
+                href={mapsLink}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex-shrink-0 text-xs font-medium text-emerald-700 underline"
+              >
+                📍 Ver ubicación
+              </a>
+            )}
           </div>
           <div className="flex items-center justify-between gap-2">
             <span className="flex flex-shrink-0 items-center gap-2">
@@ -61,7 +86,7 @@ export function VenueSummaryCard({
               <span className="ml-1 text-xs text-gray-400">/hora</span>
             </span>
           </div>
-          {venue.capacity && (
+          {Boolean(venue.capacity) && (
             <div className="flex items-center gap-2">
               <span>👥</span>
               {venue.capacity} jugadores

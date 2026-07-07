@@ -8,7 +8,7 @@ import { uploadReceipt as uploadReceiptToBlob } from "@/lib/storage/azure";
 import { businessDayStart } from "@/lib/time/business-day";
 import { checkRateLimit, getClientIp } from "@/lib/security/rate-limit";
 import { buildCheckoutPayload, isBoldConfigured, type BoldCheckoutPayload } from "@/lib/payments/bold";
-import { BookingStatus, PaymentMethod, computeBlockingSlotKey } from "./state-machine";
+import { BookingStatus, PaymentMethod, computeBlockingSlotKey, isContactComplete } from "./state-machine";
 
 const createBookingSchema = z.object({
   orgSlug: z.string().min(1),
@@ -180,6 +180,12 @@ export async function uploadManualReceipt(formData: FormData): Promise<void> {
   const booking = await db.booking.findUnique({ where: { id: bookingId } });
   if (!booking || booking.status !== BookingStatus.PENDIENTE_PAGO) {
     notFound();
+  }
+
+  // El cliente ya no debería poder llegar aquí sin datos válidos (el botón queda deshabilitado en
+  // el formulario), pero como es una Server Action invocable directamente, se revalida server-side.
+  if (!isContactComplete(booking.customerName, booking.customerPhone)) {
+    redirect(`/${orgSlug}/reserva/${bookingId}?error=datos_incompletos`);
   }
 
   const receiptUrl = await uploadReceiptToBlob(bookingId, file as File);

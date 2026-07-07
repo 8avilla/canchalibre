@@ -72,8 +72,23 @@ export function computeCancellationOutcome(
   return { refundable: false, reason: "late_cancellation" };
 }
 
-// ¿Ya tiene nombre/teléfono guardados? Función pura (sin DB), usada por el overlay del botón de
-// pago en el cliente para decidir si deja pasar el clic real de Bold o pide completar los datos.
+// Solo letras (con tildes/ñ) y espacios — sin dígitos ni símbolos.
+const NAME_PATTERN = /^[A-Za-zÁÉÍÓÚáéíóúÑñÜü]+(?:\s[A-Za-zÁÉÍÓÚáéíóúÑñÜü]+)*$/;
+// Exactamente 10 dígitos numéricos (celular colombiano sin indicativo).
+const PHONE_PATTERN = /^\d{10}$/;
+
+export function isValidCustomerName(customerName: string): boolean {
+  const trimmed = customerName.trim();
+  return trimmed.length >= 3 && NAME_PATTERN.test(trimmed);
+}
+
+export function isValidCustomerPhone(customerPhone: string): boolean {
+  return PHONE_PATTERN.test(customerPhone.trim());
+}
+
+// ¿Ya tiene nombre/teléfono válidos? Función pura (sin DB), usada tanto por el botón de pago en el
+// cliente (para decidir si deja pasar el clic real de Bold o pide completar los datos) como por el
+// servidor (para no aceptar un comprobante manual sin datos de contacto válidos).
 export function isContactComplete(customerName: string, customerPhone: string): boolean {
-  return customerName.trim().length >= 2 && customerPhone.trim().length >= 7;
+  return isValidCustomerName(customerName) && isValidCustomerPhone(customerPhone);
 }

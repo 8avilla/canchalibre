@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
 import { createVenue, updateVenue } from "@/lib/admin/actions";
+import { getVenuePhotos } from "@/lib/venues/photos";
 
 const VENUE_TYPE_LABEL: Record<string, string> = {
   FUTBOL_5: "Fútbol 5",
@@ -32,13 +33,13 @@ export default async function CanchasPage({ params }: { params: Promise<{ org: s
               <input type="hidden" name="orgSlug" value={orgSlug} />
               <input type="hidden" name="venueId" value={venue.id} />
               <label className="grid min-w-52 flex-1 gap-1 text-sm">
-                URL de foto (opcional)
-                <input
-                  type="url"
-                  name="imageUrl"
-                  defaultValue={venue.imageUrl ?? ""}
+                URLs de fotos (una por línea, opcional)
+                <textarea
+                  name="imageUrls"
+                  rows={3}
+                  defaultValue={getVenuePhotos(venue).join("\n")}
                   placeholder="https://…"
-                  className="rounded-md border border-gray-300 px-3 py-3"
+                  className="rounded-md border border-gray-300 px-3 py-3 font-mono text-xs"
                 />
               </label>
               <label className="grid gap-1 text-sm">
