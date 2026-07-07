@@ -1,0 +1,228 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../lib/generated/prisma"
+}
+
+datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
+
+enum VenueType {
+  FUTBOL_5
+  FUTBOL_8
+  PADEL
+}
+
+// Máquina de estados de negocio.md §6.1
+enum BookingStatus {
+  PENDIENTE_PAGO
+  CONFIRMADA
+  EN_CURSO
+  FINALIZADA
+  CANCELADA
+  NO_SHOW
+  EXPIRADA
+}
+
+enum PaymentMethod {
+  BOLD
+  COMPROBANTE_MANUAL
+}
+
+// negocio.md §6.4
+enum UserRole {
+  ADMIN
+  EMPLOYEE
+}
+
+enum CashShiftStatus {
+  ABIERTO
+  EN_DISPUTA
+  CERRADO
+}
+
+// Cómo se pagó el saldo restante + consumos al cerrar la cuenta de una reserva (negocio.md §3/§4).
+enum SettlementMethod {
+  EFECTIVO
+  TRANSFERENCIA
+  DATAFONO
+}
+
+model Organization {
+  id                       String   @id @default(auto()) @map("_id") @db.ObjectId
+  slug                     String   @unique
+  name                     String
+  timezone                 String   @default("America/Bogota")
+  depositPercentage        Int      @default(50)
+  cancellationWindowHours  Int      @default(24)
+  bookingHoldMinutes       Int      @default(15)
+  createdAt                DateTime @default(now())
+
+  venues           Venue[]
+  bookings         Booking[]
+  users            User[]
+  consumptionItems ConsumptionItem[]
+  cashShifts       CashShift[]
+  slotBlocks       SlotBlock[]
+}
+
+model User {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  orgId        String   @db.ObjectId
+  name         String
+  email        String   @unique
+  passwordHash String
+  role         UserRole @default(EMPLOYEE)
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+
+  organization Organization @relation(fields: [orgId], references: [id])
+  cashShifts   CashShift[]
+
+  @@index([orgId])
+}
+
+model ConsumptionItem {
+  id                String  @id @default(auto()) @map("_id") @db.ObjectId
+  orgId             String  @db.ObjectId
+  name              String
+  price             Int
+  stock             Int
+  lowStockThreshold Int     @default(10)
+  active            Boolean @default(true)
+
+  organization Organization @relation(fields: [orgId], references: [id])
+
+  @@index([orgId])
+}
+
+model CashShift {
+  id          String          @id @default(auto()) @map("_id") @db.ObjectId
+  orgId       String          @db.ObjectId
+  employeeId  String          @db.ObjectId
+  openingCash Int
+  openedAt    DateTime        @default(now())
+  closedAt    DateTime?
+  status      CashShiftStatus @default(ABIERTO)
+
+  // Conciliación automática (negocio.md §4): calculada al solicitar el cierre, antes de que el
+  // empleado vea nada ("reporte a ciegas").
+  expectedCourtsTotal Int?
+  expectedBarTotal    Int?
+  expectedCash        Int?
+  expectedTransfer    Int?
+  expectedCard        Int?
+  countedCash         Int?
+  discrepancy         Int?
+
+  // Disputa (negocio.md §6.5): solo el ADMIN puede reabrir/ajustar; cada ajuste queda en un log
+  // inmutable (nunca se sobrescribe ni se borra) y el descuadre solo se resuelve explícitamente.
+  adjustments  CashShiftAdjustment[]
+  resolvedAt   DateTime?
+  resolvedByName String?
+
+  organization Organization @relation(fields: [orgId], references: [id])
+  employee     User          @relation(fields: [employeeId], references: [id])
+
+  @@index([orgId, employeeId])
+}
+
+type CashShiftAdjustment {
+  previousCountedCash Int
+  newCountedCash      Int
+  reason              String
+  adjustedByName      String
+  adjustedAt          DateTime
+}
+
+type ConsumptionLine {
+  productId   String @db.ObjectId
+  productName String
+  unitPrice   Int
+  quantity    Int
+}
+
+model Venue {
+  id         String    @id @default(auto()) @map("_id") @db.ObjectId
+  orgId      String    @db.ObjectId
+  name       String
+  type       VenueType
+  hourlyRate Int
+  imageUrl   String?
+  capacity   Int?
+  active     Boolean   @default(true)
+
+  organization Organization @relation(fields: [orgId], references: [id])
+  bookings     Booking[]
+  slotBlocks   SlotBlock[]
+
+  @@index([orgId])
+}
+
+// Horario bloqueado manualmente por el admin (ej. mantenimiento, luces dañadas) — no es una
+// reserva de cliente, por eso vive separado de Booking en vez de mezclar estados.
+model SlotBlock {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  orgId     String   @db.ObjectId
+  venueId   String   @db.ObjectId
+  date      DateTime
+  startTime String
+  reason    String?
+  createdAt DateTime @default(now())
+
+  organization Organization @relation(fields: [orgId], references: [id])
+  venue        Venue        @relation(fields: [venueId], references: [id])
+
+  @@unique([venueId, date, startTime])
+  @@index([orgId, venueId, date])
+}
+
+model Booking {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  orgId     String   @db.ObjectId
+  venueId   String   @db.ObjectId
+
+  customerName  String
+  customerPhone String
+
+  date      DateTime // día del turno (medianoche local normalizada a UTC)
+  startTime String   // "HH:mm"
+  endTime   String   // "HH:mm"
+
+  status BookingStatus @default(PENDIENTE_PAGO)
+
+  // Anti-overbooking (negocio.md §6.3): mientras el estado bloquea el cupo (PENDIENTE_PAGO/CONFIRMADA/
+  // EN_CURSO) vale "<venueId>_<date>_<startTime>"; Prisma en MongoDB no soporta índices únicos
+  // sparse/parciales, así que al pasar a un estado terminal se reemplaza por "released_<bookingId>"
+  // (único por documento) para nunca chocar con el índice @unique de abajo.
+  blockingSlotKey String @unique
+
+  totalAmount   Int
+  depositAmount Int
+
+  // Consumo de barra (negocio.md §3): embebido en la reserva porque pertenece a la cuenta de esa
+  // cancha/turno, no a un catálogo compartido — el catálogo de productos vive en ConsumptionItem.
+  consumptionLines ConsumptionLine[]
+  consumptionTotal Int               @default(0)
+
+  paymentMethod    PaymentMethod?
+  boldPaymentRef    String?
+  receiptUrl        String? // comprobante subido a Azure Blob (Nequi/Daviplata)
+
+  // Cómo pagó el cliente el saldo restante + consumos al cerrar la cuenta (closeAccount, Fase 2).
+  // Distinto de paymentMethod, que es el canal del abono inicial.
+  settlementMethod SettlementMethod?
+
+  expiresAt DateTime? // vence si sigue en PENDIENTE_PAGO después de esta hora
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  organization Organization @relation(fields: [orgId], references: [id])
+  venue        Venue        @relation(fields: [venueId], references: [id])
+
+  @@index([orgId, venueId, date])
+}

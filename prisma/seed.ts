@@ -1,0 +1,72 @@
+import bcrypt from "bcryptjs";
+import { db } from "../lib/db";
+
+const SEED_PASSWORD = "sportarena123";
+
+async function main() {
+  const organization = await db.organization.upsert({
+    where: { slug: "aremagol" },
+    update: {},
+    create: {
+      slug: "aremagol",
+      name: "Arena Gol",
+      timezone: "America/Bogota",
+      depositPercentage: 50,
+      cancellationWindowHours: 24,
+      bookingHoldMinutes: 15,
+    },
+  });
+
+  const venues = [
+    { name: "Cancha 1 — Fútbol 5", type: "FUTBOL_5" as const, hourlyRate: 120_000 },
+    { name: "Cancha 2 — Fútbol 8", type: "FUTBOL_8" as const, hourlyRate: 180_000 },
+    { name: "Cancha 3 — Pádel", type: "PADEL" as const, hourlyRate: 60_000 },
+  ];
+
+  for (const venue of venues) {
+    const existing = await db.venue.findFirst({ where: { orgId: organization.id, name: venue.name } });
+    if (!existing) {
+      await db.venue.create({ data: { ...venue, orgId: organization.id } });
+    }
+  }
+
+  const passwordHash = await bcrypt.hash(SEED_PASSWORD, 10);
+  const users = [
+    { name: "Administradora Arena Gol", email: "admin@aremagol.test", role: "ADMIN" as const },
+    { name: "Recepción Turno Día", email: "recepcion@aremagol.test", role: "EMPLOYEE" as const },
+  ];
+
+  for (const user of users) {
+    await db.user.upsert({
+      where: { email: user.email },
+      update: {},
+      create: { ...user, orgId: organization.id, passwordHash },
+    });
+  }
+
+  const products = [
+    { name: "Agua 600ml", price: 3_000, stock: 100 },
+    { name: "Gatorade", price: 6_000, stock: 60 },
+    { name: "Cerveza", price: 8_000, stock: 80 },
+    { name: "Alquiler petos", price: 10_000, stock: 20 },
+  ];
+
+  for (const product of products) {
+    const existing = await db.consumptionItem.findFirst({ where: { orgId: organization.id, name: product.name } });
+    if (!existing) {
+      await db.consumptionItem.create({ data: { ...product, orgId: organization.id } });
+    }
+  }
+
+  console.log(`Seed listo: organización "${organization.slug}" con ${venues.length} canchas.`);
+  console.log(`Usuarios de prueba (contraseña "${SEED_PASSWORD}"): ${users.map((u) => u.email).join(", ")}`);
+}
+
+main()
+  .catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  })
+  .finally(async () => {
+    await db.$disconnect();
+  });
