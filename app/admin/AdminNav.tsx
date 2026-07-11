@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -50,16 +51,23 @@ export function AdminNav({ items }: { items: AdminNavItem[] }) {
 
   return (
     <>
-      {/* Sidebar fijo en desktop */}
-      <NavLinks
-        items={items}
-        basePath={BASE_PATH}
+      {/* Sidebar fijo en desktop, con el logo arriba */}
+      <div
         className="hidden md:sticky md:top-0 md:flex md:h-screen md:w-56 md:flex-shrink-0 md:flex-col
-          md:gap-1 md:overflow-y-auto md:border-r md:border-gray-200 md:bg-white md:p-3"
-        linkClassName={(isActive) =>
-          `flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium ${isActive ? activeClass : inactiveClass}`
-        }
-      />
+          md:border-r md:border-gray-200 md:bg-white"
+      >
+        <Link href="/admin" className="flex items-center border-b border-gray-100 px-4 py-4">
+          <Image src="/logo.png" alt="Cancha Libre" width={1774} height={887} className="h-7 w-auto" priority />
+        </Link>
+        <NavLinks
+          items={items}
+          basePath={BASE_PATH}
+          className="flex flex-1 flex-col gap-1 overflow-y-auto p-3"
+          linkClassName={(isActive) =>
+            `flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium ${isActive ? activeClass : inactiveClass}`
+          }
+        />
+      </div>
 
       {/* Barra horizontal en mobile */}
       <div className="relative border-b border-gray-200 bg-white md:hidden">

@@ -17,6 +17,14 @@ export function businessDayStart(dateIso: string): Date {
   return new Date(`${dateIso}T00:00:00.000${BUSINESS_UTC_OFFSET}`);
 }
 
+// Combina el "día del turno" (dateIso, medianoche Bogotá tal como vive en Booking.date) con una hora
+// "HH:mm" del mismo turno (startTime/endTime) en un instante real — usado para calcular la ventana de
+// cancelación (computeCancellationOutcome) y para detectar reservas cuya franja horaria ya pasó
+// (cron de no-show).
+export function businessDateTimeInstant(dateIso: string, time: string): Date {
+  return new Date(`${dateIso}T${time}:00.000${BUSINESS_UTC_OFFSET}`);
+}
+
 export function businessDayRange(dateIso: string): { start: Date; end: Date } {
   const start = businessDayStart(dateIso);
   const end = new Date(start);

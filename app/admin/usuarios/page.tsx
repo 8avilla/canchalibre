@@ -1,7 +1,10 @@
 import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
-import { createUser, updateUser, resetUserPassword } from "@/lib/admin/actions";
+import { createUser, resetUserPassword } from "@/lib/admin/actions";
 import { requireAdminSession } from "@/lib/auth/session-guards";
+import { Banner } from "@/app/admin/Banner";
+import { SubmitButton } from "@/app/components/SubmitButton";
+import { UpdateUserForm } from "./UpdateUserForm";
 
 const ERROR_MESSAGES: Record<string, string> = {
   datos_invalidos: "Revisa los datos ingresados (la contraseña debe tener al menos 8 caracteres).",
@@ -11,6 +14,8 @@ const ERROR_MESSAGES: Record<string, string> = {
 
 const OK_MESSAGES: Record<string, string> = {
   clave_actualizada: "Contraseña actualizada.",
+  usuario_creado: "Usuario creado correctamente.",
+  usuario_actualizado: "Usuario actualizado correctamente.",
 };
 
 export default async function UsuariosPage({
@@ -30,15 +35,11 @@ export default async function UsuariosPage({
   const users = await db.user.findMany({ where: { orgId: organization.id }, orderBy: { name: "asc" } });
 
   return (
-    <main className="mx-auto max-w-2xl px-4 py-10">
+    <main className="px-6 py-10">
       <h1 className="text-xl font-semibold">Usuarios — {organization.name}</h1>
 
-      {error && ERROR_MESSAGES[error] && (
-        <p className="mt-4 rounded-md bg-red-50 p-3 text-sm text-red-800">{ERROR_MESSAGES[error]}</p>
-      )}
-      {ok && OK_MESSAGES[ok] && (
-        <p className="mt-4 rounded-md bg-green-50 p-3 text-sm text-green-800">{OK_MESSAGES[ok]}</p>
-      )}
+      {error && ERROR_MESSAGES[error] && <div className="mt-4"><Banner type="error" message={ERROR_MESSAGES[error]} /></div>}
+      {ok && OK_MESSAGES[ok] && <div className="mt-4"><Banner type="success" message={OK_MESSAGES[ok]} /></div>}
 
       <ul className="mt-6 grid gap-3">
         {users.map((user) => {
@@ -52,40 +53,7 @@ export default async function UsuariosPage({
                 <span className="text-xs text-gray-500">{user.email}</span>
               </div>
 
-              <form action={updateUser} className="mt-3 flex flex-wrap items-end gap-3">
-                <input type="hidden" name="userId" value={user.id} />
-                <label className="grid gap-1 text-sm">
-                  Rol
-                  <select
-                    name="role"
-                    defaultValue={user.role}
-                    disabled={isSelf}
-                    className="rounded-md border border-gray-300 px-3 py-3 disabled:bg-gray-100"
-                  >
-                    <option value="ADMIN">Administrador</option>
-                    <option value="EMPLOYEE">Empleado</option>
-                  </select>
-                </label>
-                <label className="grid gap-1 text-sm">
-                  Estado
-                  <select
-                    name="active"
-                    defaultValue={user.active ? "true" : "false"}
-                    disabled={isSelf}
-                    className="rounded-md border border-gray-300 px-3 py-3 disabled:bg-gray-100"
-                  >
-                    <option value="true">Activo</option>
-                    <option value="false">Inactivo</option>
-                  </select>
-                </label>
-                <button
-                  type="submit"
-                  disabled={isSelf}
-                  className="rounded-md bg-gray-900 px-3 py-3 text-sm text-white disabled:opacity-40"
-                >
-                  Guardar
-                </button>
-              </form>
+              <UpdateUserForm userId={user.id} role={user.role} active={user.active} disabled={isSelf} />
 
               <form action={resetUserPassword} className="mt-2 flex items-end gap-3">
                 <input type="hidden" name="userId" value={user.id} />
@@ -99,9 +67,12 @@ export default async function UsuariosPage({
                     className="rounded-md border border-gray-300 px-3 py-3"
                   />
                 </label>
-                <button type="submit" className="rounded-md bg-blue-600 px-3 py-3 text-sm text-white">
+                <SubmitButton
+                  confirmMessage="¿Resetear la contraseña de este usuario?"
+                  className="rounded-md bg-blue-600 px-3 py-3 text-sm text-white"
+                >
                   Resetear contraseña
-                </button>
+                </SubmitButton>
               </form>
             </li>
           );
@@ -140,9 +111,9 @@ export default async function UsuariosPage({
             <option value="ADMIN">Administrador</option>
           </select>
         </label>
-        <button type="submit" className="rounded-md bg-gray-900 px-4 py-3 text-sm font-medium text-white">
+        <SubmitButton className="rounded-md bg-gray-900 px-4 py-3 text-sm font-medium text-white">
           Crear usuario
-        </button>
+        </SubmitButton>
       </form>
     </main>
   );

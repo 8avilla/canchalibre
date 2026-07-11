@@ -5,16 +5,20 @@ import { notFound, redirect } from "next/navigation";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { ADMIN_ORG_COOKIE, requireAdminSession } from "@/lib/auth/session-guards";
+import { notifyBookingCancelled } from "@/lib/booking/actions";
 import {
   BookingStatus,
+  CancelledBy,
   canTransition,
   computeBlockingSlotKey,
+  computeCancellationOutcome,
   computeReleasedSlotKey,
 } from "@/lib/booking/state-machine";
 import { isValidMunicipio } from "@/lib/data/colombia";
 import { db, isUniqueConstraintError } from "@/lib/db";
 import { uploadOrganizationLogo, uploadVenuePhoto } from "@/lib/storage/azure";
-import { addBusinessDays, businessDayStart } from "@/lib/time/business-day";
+import { addBusinessDays, businessDateTimeInstant, businessDayStart } from "@/lib/time/business-day";
+import { logAdminAction } from "./audit";
 
 const MAX_RECURRING_OCCURRENCES = 52;
 
@@ -92,7 +96,7 @@ export async function updateVenue(formData: FormData): Promise<void> {
     notFound();
   }
 
-  await requireAdminSession();
+  const { session } = await requireAdminSession();
 
   const { venueId } = parsed.data;
   const venue = await db.venue.findUnique({ where: { id: venueId } });
@@ -119,6 +123,16 @@ export async function updateVenue(formData: FormData): Promise<void> {
   }
 
   const uploadedUrls = await Promise.all(newFiles.map((file) => uploadVenuePhoto(venueId, file)));
+
+  if (parsed.data.hourlyRate !== venue.hourlyRate) {
+    await logAdminAction({
+      orgId: venue.orgId,
+      actorUserId: session.user.id,
+      actorName: session.user.name,
+      action: "venue.updatePrice",
+      summary: `Cambió tarifa de ${venue.name} de $${venue.hourlyRate.toLocaleString("es-CO")} a $${parsed.data.hourlyRate.toLocaleString("es-CO")}`,
+    });
+  }
 
   await db.venue.update({
     where: { id: venueId },
@@ -158,7 +172,7 @@ export async function createProduct(formData: FormData): Promise<void> {
     notFound();
   }
 
-  await db.consumptionItem.create({
+  const product = await db.consumptionItem.create({
     data: {
       orgId: org.id,
       name: parsed.data.name,
@@ -168,7 +182,7 @@ export async function createProduct(formData: FormData): Promise<void> {
     },
   });
 
-  redirect("/admin/inventario");
+  redirect(`/admin/inventario?creado=${product.id}`);
 }
 
 const updateProductSchema = z.object({
@@ -200,7 +214,7 @@ export async function updateProduct(formData: FormData): Promise<void> {
     },
   });
 
-  redirect("/admin/inventario");
+  redirect(`/admin/inventario?actualizado=${parsed.data.productId}`);
 }
 
 const adjustStockSchema = z.object({
@@ -218,7 +232,7 @@ export async function adjustStock(formData: FormData): Promise<void> {
     notFound();
   }
 
-  await requireAdminSession();
+  const { session } = await requireAdminSession();
 
   const product = await db.consumptionItem.findUnique({ where: { id: parsed.data.productId } });
   if (!product) {
@@ -232,7 +246,15 @@ export async function adjustStock(formData: FormData): Promise<void> {
     data: { stock: newStock },
   });
 
-  redirect("/admin/inventario");
+  await logAdminAction({
+    orgId: product.orgId,
+    actorUserId: session.user.id,
+    actorName: session.user.name,
+    action: "product.adjustStock",
+    summary: `Ajustó stock de ${product.name}: ${product.stock} → ${newStock} (${parsed.data.delta > 0 ? "+" : ""}${parsed.data.delta})`,
+  });
+
+  redirect(`/admin/inventario?actualizado=${product.id}`);
 }
 
 const settingsSchema = z.object({
@@ -415,16 +437,46 @@ export async function cancelConfirmedBooking(formData: FormData): Promise<void> 
     notFound();
   }
 
-  await requireAdminSession();
+  const { session } = await requireAdminSession();
 
   const booking = await db.booking.findUnique({ where: { id: parsed.data.bookingId } });
   if (!booking || !canTransition(booking.status, BookingStatus.CANCELADA)) {
     notFound();
   }
 
+  const organization = await db.organization.findUnique({ where: { id: booking.orgId } });
+  const venue = await db.venue.findUnique({ where: { id: booking.venueId } });
+
+  // El admin puede cancelar sin importar la ventana de tiempo — computeCancellationOutcome acá solo
+  // deja un registro consistente de "hubiera sido reembolsable", nunca bloquea la cancelación.
+  const dateIso = booking.date.toISOString().slice(0, 10);
+  const outcome = organization
+    ? computeCancellationOutcome(businessDateTimeInstant(dateIso, booking.startTime), new Date(), {
+        cancellationWindowHours: organization.cancellationWindowHours,
+      })
+    : { refundable: false as const, reason: "late_cancellation" as const };
+
   await db.booking.update({
     where: { id: booking.id },
-    data: { status: BookingStatus.CANCELADA, blockingSlotKey: computeReleasedSlotKey(booking.id) },
+    data: {
+      status: BookingStatus.CANCELADA,
+      blockingSlotKey: computeReleasedSlotKey(booking.id),
+      cancelledAt: new Date(),
+      cancelledBy: CancelledBy.ADMIN,
+      cancellationReason: outcome.reason,
+    },
+  });
+
+  if (organization) {
+    await notifyBookingCancelled(booking, organization, outcome);
+  }
+
+  await logAdminAction({
+    orgId: booking.orgId,
+    actorUserId: session.user.id,
+    actorName: session.user.name,
+    action: "booking.cancel",
+    summary: `Canceló la reserva de ${booking.customerName || "cliente sin nombre"} (${venue?.name ?? booking.venueId}) del ${dateIso} ${booking.startTime}`,
   });
 
   // Vuelve a la lista preservando los filtros que el admin tenía activos (rango de fechas, cancha,
@@ -452,8 +504,8 @@ export async function cancelConfirmedBooking(formData: FormData): Promise<void> 
   if (parsed.data.phone) {
     query.set("phone", parsed.data.phone);
   }
-  const queryString = query.toString();
-  redirect(`/admin/reservas${queryString ? `?${queryString}` : ""}`);
+  query.set("cancelada", "1");
+  redirect(`/admin/reservas?${query.toString()}`);
 }
 
 const createRecurringBookingSchema = z.object({
@@ -503,7 +555,7 @@ export async function createRecurringBooking(formData: FormData): Promise<void> 
   const { venueId, customerName, customerPhone, startDate, endDate, startTime, endTime, requiresDeposit } =
     parsed.data;
 
-  const { orgSlug } = await requireAdminSession();
+  const { session, orgSlug } = await requireAdminSession();
 
   if (endDate < startDate) {
     redirect("/admin/reservas?error=recurrente_rango_invalido");
@@ -568,6 +620,14 @@ export async function createRecurringBooking(formData: FormData): Promise<void> 
     throw error;
   }
 
+  await logAdminAction({
+    orgId: org.id,
+    actorUserId: session.user.id,
+    actorName: session.user.name,
+    action: "booking.createRecurring",
+    summary: `Creó reserva recurrente para ${customerName} en ${venue.name}, ${startTime}-${endTime}, ${occurrenceDates.length} ocurrencias (${startDate} a ${endDate})`,
+  });
+
   redirect(`/admin/reservas?dateFrom=${startDate}&dateTo=${startDate}&recurrente=creada`);
 }
 
@@ -589,7 +649,7 @@ export async function createUser(formData: FormData): Promise<void> {
     redirect("/admin/usuarios?error=datos_invalidos");
   }
 
-  const { orgSlug } = await requireAdminSession();
+  const { session, orgSlug } = await requireAdminSession();
 
   const org = await db.organization.findUnique({ where: { slug: orgSlug } });
   if (!org) {
@@ -613,7 +673,15 @@ export async function createUser(formData: FormData): Promise<void> {
     },
   });
 
-  redirect("/admin/usuarios");
+  await logAdminAction({
+    orgId: org.id,
+    actorUserId: session.user.id,
+    actorName: session.user.name,
+    action: "user.create",
+    summary: `Creó el usuario ${parsed.data.name} (${parsed.data.email}) como ${parsed.data.role}`,
+  });
+
+  redirect("/admin/usuarios?ok=usuario_creado");
 }
 
 const updateUserSchema = z.object({
@@ -651,7 +719,21 @@ export async function updateUser(formData: FormData): Promise<void> {
     data: { role: parsed.data.role, active: parsed.data.active === "true" },
   });
 
-  redirect("/admin/usuarios");
+  const changes: string[] = [];
+  if (parsed.data.role !== user.role) changes.push(`rol ${user.role} → ${parsed.data.role}`);
+  const newActive = parsed.data.active === "true";
+  if (newActive !== user.active) changes.push(newActive ? "reactivado" : "desactivado");
+  if (changes.length > 0) {
+    await logAdminAction({
+      orgId,
+      actorUserId: session.user.id,
+      actorName: session.user.name,
+      action: "user.update",
+      summary: `Actualizó a ${user.name}: ${changes.join(", ")}`,
+    });
+  }
+
+  redirect("/admin/usuarios?ok=usuario_actualizado");
 }
 
 const resetPasswordSchema = z.object({
@@ -668,7 +750,7 @@ export async function resetUserPassword(formData: FormData): Promise<void> {
     redirect("/admin/usuarios?error=datos_invalidos");
   }
 
-  const { orgSlug } = await requireAdminSession();
+  const { session, orgSlug } = await requireAdminSession();
 
   const orgId = await resolveOrgId(orgSlug);
   const user = await db.user.findUnique({ where: { id: parsed.data.userId } });
@@ -679,6 +761,14 @@ export async function resetUserPassword(formData: FormData): Promise<void> {
   const passwordHash = await bcrypt.hash(parsed.data.newPassword, 10);
 
   await db.user.update({ where: { id: user.id }, data: { passwordHash } });
+
+  await logAdminAction({
+    orgId,
+    actorUserId: session.user.id,
+    actorName: session.user.name,
+    action: "user.resetPassword",
+    summary: `Reseteó la contraseña de ${user.name}`,
+  });
 
   redirect("/admin/usuarios?ok=clave_actualizada");
 }
@@ -738,7 +828,7 @@ export async function blockSlot(formData: FormData): Promise<void> {
     },
   });
 
-  redirect(`/admin/mantenimiento?venueId=${venue.id}&date=${parsed.data.date}`);
+  redirect(`/admin/mantenimiento?venueId=${venue.id}&date=${parsed.data.date}&bloqueado=1`);
 }
 
 const unblockSlotSchema = z.object({
@@ -767,5 +857,5 @@ export async function unblockSlot(formData: FormData): Promise<void> {
 
   await db.slotBlock.delete({ where: { id: block.id } });
 
-  redirect(`/admin/mantenimiento?venueId=${parsed.data.venueId}&date=${parsed.data.date}`);
+  redirect(`/admin/mantenimiento?venueId=${parsed.data.venueId}&date=${parsed.data.date}&desbloqueado=1`);
 }

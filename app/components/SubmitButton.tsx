@@ -10,11 +10,15 @@ export function SubmitButton({
   pendingLabel,
   className,
   disabled,
+  confirmMessage,
 }: {
   children: React.ReactNode;
   pendingLabel?: string;
   className?: string;
   disabled?: boolean;
+  // Si viene, pide confirmación nativa antes de dejar pasar el submit — para acciones destructivas
+  // (cancelar reserva, resetear contraseña) sin tener que construir un modal propio.
+  confirmMessage?: string;
 }) {
   const { pending } = useFormStatus();
 
@@ -22,6 +26,11 @@ export function SubmitButton({
     <button
       type="submit"
       disabled={pending || disabled}
+      onClick={(e) => {
+        if (confirmMessage && !window.confirm(confirmMessage)) {
+          e.preventDefault();
+        }
+      }}
       className={`${className ?? ""} disabled:cursor-not-allowed disabled:opacity-60`}
     >
       {pending ? (

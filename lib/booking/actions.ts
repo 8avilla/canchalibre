@@ -5,11 +5,22 @@ import { headers } from "next/headers";
 import { z } from "zod";
 import { db, isUniqueConstraintError } from "@/lib/db";
 import { uploadReceipt as uploadReceiptToBlob } from "@/lib/storage/azure";
-import { businessDayStart, formatBusinessDayLabel } from "@/lib/time/business-day";
+import { businessDateTimeInstant, businessDayStart, formatBusinessDayLabel } from "@/lib/time/business-day";
 import { checkRateLimit, getClientIp } from "@/lib/security/rate-limit";
 import { buildCheckoutPayload, isBoldConfigured, type BoldCheckoutPayload } from "@/lib/payments/bold";
+import { getCustomerSession } from "@/lib/customer-auth/session";
 import { NotificationService } from "@/lib/notifications";
-import { BookingStatus, PaymentMethod, computeBlockingSlotKey, isContactComplete } from "./state-machine";
+import {
+  BookingStatus,
+  CancelledBy,
+  PaymentMethod,
+  canTransition,
+  computeBlockingSlotKey,
+  computeCancellationOutcome,
+  computeReleasedSlotKey,
+  isContactComplete,
+  type CancellationOutcome,
+} from "./state-machine";
 
 const createBookingSchema = z.object({
   orgSlug: z.string().min(1),
@@ -213,6 +224,68 @@ export async function uploadManualReceipt(formData: FormData): Promise<void> {
   redirect(`/${orgSlug}/reserva/${bookingId}?comprobante=enviado`);
 }
 
+const cancelByCustomerSchema = z.object({
+  orgSlug: z.string().min(1),
+  bookingId: z.string().min(1),
+});
+
+// Cancelación self-service del cliente (negocio.md §6.2) — antes de esto, cancelar solo lo podía hacer
+// un ADMIN desde /admin/reservas; al cliente se le pedía escribir por WhatsApp. Aplica la misma
+// política de reembolso (computeCancellationOutcome) que ya existía sin usarse en state-machine.ts.
+export async function cancelBookingByCustomer(formData: FormData): Promise<void> {
+  const parsed = cancelByCustomerSchema.safeParse({
+    orgSlug: formData.get("orgSlug"),
+    bookingId: formData.get("bookingId"),
+  });
+  if (!parsed.success) {
+    notFound();
+  }
+  const { orgSlug, bookingId } = parsed.data;
+
+  const ip = await getClientIp();
+  if (!checkRateLimit(`cancelar-reserva:${ip}`, 10, 10 * 60_000)) {
+    redirect(`/${orgSlug}/reserva/${bookingId}?error=demasiados_intentos`);
+  }
+
+  const customer = await getCustomerSession();
+  if (!customer) {
+    redirect(`/${orgSlug}/reserva/${bookingId}?error=sesion_requerida`);
+  }
+
+  const booking = await db.booking.findUnique({ where: { id: bookingId } });
+  if (!booking || booking.customerPhone !== customer.phone) {
+    notFound();
+  }
+  if (!canTransition(booking.status, BookingStatus.CANCELADA)) {
+    redirect(`/${orgSlug}/reserva/${bookingId}?error=no_cancelable`);
+  }
+
+  const organization = await db.organization.findUnique({ where: { id: booking.orgId } });
+  if (!organization) {
+    notFound();
+  }
+
+  const dateIso = booking.date.toISOString().slice(0, 10);
+  const outcome = computeCancellationOutcome(businessDateTimeInstant(dateIso, booking.startTime), new Date(), {
+    cancellationWindowHours: organization.cancellationWindowHours,
+  });
+
+  await db.booking.update({
+    where: { id: booking.id },
+    data: {
+      status: BookingStatus.CANCELADA,
+      blockingSlotKey: computeReleasedSlotKey(booking.id),
+      cancelledAt: new Date(),
+      cancelledBy: CancelledBy.CUSTOMER,
+      cancellationReason: outcome.reason,
+    },
+  });
+
+  await notifyBookingCancelled(booking, organization, outcome);
+
+  redirect(`/${orgSlug}/reserva/${bookingId}?cancelada=1`);
+}
+
 // Llamado desde el webhook de Bold (y, en Fase 2, desde la aprobación manual en el POS de recepción).
 export async function confirmBookingPayment(bookingId: string, boldPaymentRef?: string): Promise<void> {
   const booking = await db.booking.findUnique({ where: { id: bookingId } });
@@ -289,5 +362,60 @@ async function sendBookingConfirmedEmails(booking: {
     ]);
   } catch (error) {
     console.error("[booking] error enviando correos de confirmación", error);
+  }
+}
+
+// Aviso de cancelación (WhatsApp stub + correo real al admin) — reusado tanto por
+// cancelBookingByCustomer (arriba) como por cancelConfirmedBooking (lib/admin/actions.ts), para no
+// duplicar el envío. Aislado en try/catch: un fallo de notificación no debe tumbar la cancelación,
+// que ya se aplicó en la base de datos antes de llamar a esta función.
+export async function notifyBookingCancelled(
+  booking: {
+    id: string;
+    orgId: string;
+    venueId: string;
+    customerName: string;
+    customerPhone: string;
+    date: Date;
+    startTime: string;
+    endTime: string;
+  },
+  organization: { name: string },
+  outcome: CancellationOutcome,
+): Promise<void> {
+  try {
+    const [venue, admin] = await Promise.all([
+      db.venue.findUnique({ where: { id: booking.venueId } }),
+      db.user.findFirst({ where: { orgId: booking.orgId, role: "ADMIN" } }),
+    ]);
+    if (!venue) return;
+
+    const { weekday, day, month } = formatBusinessDayLabel(booking.date.toISOString().slice(0, 10));
+    const dateLabel = `${weekday} ${day} de ${month}`;
+
+    await Promise.all([
+      NotificationService.sendBookingCancellation({
+        customerPhone: booking.customerPhone,
+        customerName: booking.customerName,
+        venueName: venue.name,
+        date: dateLabel,
+        startTime: booking.startTime,
+        refundable: outcome.refundable,
+      }),
+      admin
+        ? NotificationService.sendBookingCancelledAlertEmail({
+            adminEmail: admin.email,
+            customerName: booking.customerName,
+            customerPhone: booking.customerPhone,
+            venueName: venue.name,
+            dateLabel,
+            startTime: booking.startTime,
+            endTime: booking.endTime,
+            refundable: outcome.refundable,
+          })
+        : Promise.resolve(),
+    ]);
+  } catch (error) {
+    console.error("[booking] error enviando notificaciones de cancelación", error);
   }
 }

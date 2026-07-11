@@ -3,9 +3,10 @@ import { notFound } from "next/navigation";
 import { headers } from "next/headers";
 import { db } from "@/lib/db";
 import { buildCheckoutPayload, isBoldConfigured } from "@/lib/payments/bold";
-import { uploadManualReceipt } from "@/lib/booking/actions";
-import { BookingStatus } from "@/lib/booking/state-machine";
-import { formatBusinessDayLabel } from "@/lib/time/business-day";
+import { cancelBookingByCustomer, uploadManualReceipt } from "@/lib/booking/actions";
+import { BookingStatus, computeCancellationOutcome } from "@/lib/booking/state-machine";
+import { businessDateTimeInstant, formatBusinessDayLabel } from "@/lib/time/business-day";
+import { getCustomerSession } from "@/lib/customer-auth/session";
 import { getOrgMapsLink } from "@/lib/org/maps";
 import { SubmitButton } from "@/app/components/SubmitButton";
 import { BoldButton } from "@/app/components/BoldButton";
@@ -19,11 +20,27 @@ const ERROR_MESSAGES: Record<string, string> = {
   comprobante_requerido: "Debes adjuntar el comprobante de pago.",
   demasiados_intentos: "Demasiados intentos seguidos. Espera unos minutos y vuelve a intentarlo.",
   datos_incompletos: "Completa tu nombre y WhatsApp antes de subir el comprobante.",
+  sesion_requerida: "Ingresa con tu WhatsApp en Mis reservas para poder cancelar.",
+  no_cancelable: "Esta reserva ya no se puede cancelar.",
 };
 
 const PAYMENT_METHOD_LABEL: Record<string, string> = {
   BOLD: "Bold",
   COMPROBANTE_MANUAL: "Comprobante manual",
+};
+
+// negocio.md §6.2 — quién disparó la cancelación y si el abono queda reembolsable.
+const CANCELLED_BY_LABEL: Record<string, string> = {
+  CUSTOMER: "Cancelada por ti",
+  ADMIN: "Cancelada por el complejo",
+  EMPLOYEE: "Cancelada por el complejo",
+  SYSTEM: "Cancelada automáticamente",
+};
+
+const REFUND_LABEL: Record<string, string> = {
+  within_window: "Tu abono será reembolsado.",
+  late_cancellation: "El abono no es reembolsable (cancelación fuera de plazo).",
+  no_show: "El abono no es reembolsable.",
 };
 
 // Bold exige que `data-redirection-url` sea HTTPS (valida el esquema al renderizar el botón, antes
@@ -44,10 +61,10 @@ export default async function ReservaPage({
   searchParams,
 }: {
   params: Promise<{ org: string; bookingId: string }>;
-  searchParams: Promise<{ error?: string; comprobante?: string; "bold-tx-status"?: string }>;
+  searchParams: Promise<{ error?: string; comprobante?: string; cancelada?: string; "bold-tx-status"?: string }>;
 }) {
   const { org: orgSlug, bookingId } = await params;
-  const { error, comprobante, "bold-tx-status": boldTxStatus } = await searchParams;
+  const { error, comprobante, cancelada, "bold-tx-status": boldTxStatus } = await searchParams;
 
   const organization = await db.organization.findUnique({ where: { slug: orgSlug } });
   if (!organization) {
@@ -65,6 +82,17 @@ export default async function ReservaPage({
   const remainder = booking.totalAmount - booking.depositAmount;
   const showsPaymentStep =
     booking.status === BookingStatus.PENDIENTE_PAGO && !booking.receiptUrl && !boldTxStatus;
+
+  // Solo el dueño de la reserva (logueado en Mis reservas con el mismo WhatsApp) ve el botón de
+  // cancelar. previewOutcome es solo para mostrarle si es reembolsable antes de confirmar — el
+  // servidor vuelve a calcularlo al procesar la cancelación, nunca se confía en este preview.
+  const customer = await getCustomerSession();
+  const isOwner = customer?.phone === booking.customerPhone;
+  const previewOutcome = computeCancellationOutcome(
+    businessDateTimeInstant(dateIso, booking.startTime),
+    new Date(),
+    { cancellationWindowHours: organization.cancellationWindowHours },
+  );
 
   return (
     <>
@@ -86,6 +114,7 @@ export default async function ReservaPage({
       </div>
 
       {error && ERROR_MESSAGES[error] && <QueryToast type="error" message={ERROR_MESSAGES[error]} />}
+      {cancelada === "1" && <QueryToast type="success" message="Tu reserva fue cancelada." />}
 
       {booking.status === BookingStatus.CONFIRMADA && (
         <>
@@ -132,16 +161,109 @@ export default async function ReservaPage({
           >
             Volver al inicio
           </Link>
+
+          {isOwner && (
+            <form action={cancelBookingByCustomer} className="mt-3">
+              <input type="hidden" name="orgSlug" value={orgSlug} />
+              <input type="hidden" name="bookingId" value={booking.id} />
+              <SubmitButton
+                pendingLabel="Cancelando…"
+                confirmMessage={`${
+                  previewOutcome.refundable
+                    ? "Tu abono será reembolsado."
+                    : "El abono no será reembolsable (fuera del plazo de cancelación gratuita)."
+                } ¿Confirmas que quieres cancelar la reserva?`}
+                className="block w-full rounded-md border border-red-200 px-4 py-3 text-center text-sm font-medium text-red-700 hover:bg-red-50"
+              >
+                Cancelar reserva
+              </SubmitButton>
+            </form>
+          )}
         </>
       )}
 
-      {(booking.status === BookingStatus.EXPIRADA || booking.status === BookingStatus.CANCELADA) && (
+      {booking.status === BookingStatus.EN_CURSO && (
+        <div className="mt-6 flex flex-col items-center text-center">
+          <span className="flex h-16 w-16 items-center justify-center rounded-full bg-blue-100 text-4xl">🏃</span>
+          <h2 className="mt-3 text-lg font-semibold text-gray-900">En curso</h2>
+          <p className="mt-1 text-sm text-gray-500">¡Disfruta tu partido!</p>
+          <Link
+            href={`/${orgSlug}`}
+            className="mt-4 block w-full rounded-md border border-gray-200 px-4 py-3 text-center text-sm font-medium text-gray-700 hover:bg-gray-50"
+          >
+            Volver al inicio
+          </Link>
+        </div>
+      )}
+
+      {booking.status === BookingStatus.FINALIZADA && (
+        <div className="mt-6 flex flex-col items-center text-center">
+          <span className="flex h-16 w-16 items-center justify-center rounded-full bg-emerald-100 text-4xl">✅</span>
+          <h2 className="mt-3 text-lg font-semibold text-gray-900">Reserva finalizada</h2>
+          <p className="mt-1 text-sm text-gray-500">
+            {weekday} {day} de {month} a las {booking.startTime}.
+          </p>
+          {booking.consumptionTotal > 0 && (
+            <p className="mt-1 text-sm text-gray-500">
+              Consumos: ${booking.consumptionTotal.toLocaleString("es-CO")}
+            </p>
+          )}
+          <Link
+            href={`/${orgSlug}`}
+            className="mt-4 block w-full rounded-md border border-gray-200 px-4 py-3 text-center text-sm font-medium text-gray-700 hover:bg-gray-50"
+          >
+            Volver al inicio
+          </Link>
+        </div>
+      )}
+
+      {booking.status === BookingStatus.CANCELADA && (
+        <>
+          <div className="mt-6 flex flex-col items-center text-center">
+            <span className="flex h-16 w-16 items-center justify-center rounded-full bg-red-100 text-4xl">✕</span>
+            <h2 className="mt-3 text-lg font-semibold text-gray-900">
+              {(booking.cancelledBy && CANCELLED_BY_LABEL[booking.cancelledBy]) || "Reserva cancelada"}
+            </h2>
+            <p className="mt-1 text-sm text-gray-500">
+              {(booking.cancellationReason && REFUND_LABEL[booking.cancellationReason]) ||
+                "Esta reserva ya no está disponible."}
+            </p>
+          </div>
+          <Link
+            href={`/${orgSlug}/${booking.venueId}`}
+            className="mt-4 block rounded-md bg-emerald-700 px-4 py-3 text-center text-sm font-medium text-white hover:bg-emerald-800"
+          >
+            Elegir otro horario
+          </Link>
+        </>
+      )}
+
+      {booking.status === BookingStatus.NO_SHOW && (
+        <>
+          <div className="mt-6 flex flex-col items-center text-center">
+            <span className="flex h-16 w-16 items-center justify-center rounded-full bg-red-100 text-4xl">✕</span>
+            <h2 className="mt-3 text-lg font-semibold text-gray-900">No te presentaste</h2>
+            <p className="mt-1 text-sm text-gray-500">
+              No llegaste en el horario reservado. Según la política del complejo, el abono no es
+              reembolsable.
+            </p>
+          </div>
+          <Link
+            href={`/${orgSlug}`}
+            className="mt-4 block rounded-md bg-emerald-700 px-4 py-3 text-center text-sm font-medium text-white hover:bg-emerald-800"
+          >
+            Volver al inicio
+          </Link>
+        </>
+      )}
+
+      {booking.status === BookingStatus.EXPIRADA && (
         <>
           <div className="mt-6 flex flex-col items-center text-center">
             <span className="flex h-16 w-16 items-center justify-center rounded-full bg-red-100 text-4xl">✕</span>
             <h2 className="mt-3 text-lg font-semibold text-gray-900">Reserva no vigente</h2>
             <p className="mt-1 text-sm text-gray-500">
-              Esta reserva ya no está disponible. Vuelve a intentarlo desde el inicio.
+              Se te acabó el tiempo para pagar el abono y se liberó el horario. Vuelve a intentarlo.
             </p>
           </div>
           <Link

@@ -103,6 +103,50 @@ export const NotificationService = {
     );
   },
 
+  // Mismo hueco que sendBookingConfirmation: aviso de cancelación al cliente por WhatsApp — se llama
+  // desde notifyBookingCancelled (lib/booking/actions.ts), sea que cancele el cliente, el admin, o el
+  // cron de no-show.
+  async sendBookingCancellation(params: {
+    customerPhone: string;
+    customerName: string;
+    venueName: string;
+    date: string;
+    startTime: string;
+    refundable: boolean;
+  }): Promise<void> {
+    console.warn(
+      `[notifications] WhatsApp no configurado todavía — se omite el aviso de cancelación a ` +
+        `${params.customerPhone} (${params.venueName}, ${params.date} ${params.startTime}, ` +
+        `reembolsable: ${params.refundable})`,
+    );
+  },
+
+  // Correo real (Mailgun) al admin del complejo avisando la cancelación — mismo espíritu que
+  // sendNewBookingAlertEmail.
+  async sendBookingCancelledAlertEmail(params: {
+    adminEmail: string;
+    customerName: string;
+    customerPhone: string;
+    venueName: string;
+    dateLabel: string;
+    startTime: string;
+    endTime: string;
+    refundable: boolean;
+  }): Promise<void> {
+    await sendEmail(
+      params.adminEmail,
+      `Reserva cancelada — ${params.venueName}`,
+      `<p>Se canceló una reserva.</p>
+       <ul>
+         <li>Cliente: ${params.customerName} (${params.customerPhone})</li>
+         <li>Cancha: ${params.venueName}</li>
+         <li>Fecha: ${params.dateLabel}</li>
+         <li>Horario: ${params.startTime} - ${params.endTime}</li>
+         <li>Reembolsable: ${params.refundable ? "Sí" : "No"}</li>
+       </ul>`,
+    );
+  },
+
   // Mismo hueco que sendBookingConfirmation: hasta que existan credenciales de WhatsApp Business
   // API, el código de acceso de "Mis reservas" solo queda registrado acá (requestLoginCode además
   // devuelve el código en dev/staging para poder probar el login sin WhatsApp real).

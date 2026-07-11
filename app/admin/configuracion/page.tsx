@@ -3,6 +3,8 @@ import { updateOrganizationLogo, updateOrganizationSettings, updateOrganizationS
 import { requireAdminSession } from "@/lib/auth/session-guards";
 import { db } from "@/lib/db";
 import { LocationForm } from "./LocationForm";
+import { Banner } from "@/app/admin/Banner";
+import { SubmitButton } from "@/app/components/SubmitButton";
 
 const ERROR_MESSAGES: Record<string, string> = {
   logo_requerido: "Selecciona un archivo de logo.",
@@ -27,7 +29,7 @@ export default async function ConfiguracionPage({
   }
 
   return (
-    <main className="mx-auto max-w-md px-4 py-10">
+    <main className="px-6 py-10">
       <h1 className="text-xl font-semibold">Configuración — {organization.name}</h1>
 
       <form action={updateOrganizationSlug} className="mt-6 grid gap-2 rounded-lg border border-gray-200 p-4">
@@ -49,17 +51,14 @@ export default async function ConfiguracionPage({
           enlaces que hayas compartido con el slug anterior dejarán de funcionar.
         </p>
 
-        {slug === "actualizado" && <p className="text-sm text-emerald-700">Slug actualizado correctamente.</p>}
+        {slug === "actualizado" && <Banner type="success" message="Slug actualizado correctamente." />}
         {error && (error === "slug_invalido" || error === "slug_en_uso") && (
-          <p className="text-sm text-red-600">{ERROR_MESSAGES[error]}</p>
+          <Banner type="error" message={ERROR_MESSAGES[error]} />
         )}
 
-        <button
-          type="submit"
-          className="mt-1 rounded-md bg-gray-900 px-4 py-3 font-medium text-white hover:bg-gray-800"
-        >
+        <SubmitButton className="mt-1 rounded-md bg-gray-900 px-4 py-3 font-medium text-white hover:bg-gray-800">
           Guardar slug
-        </button>
+        </SubmitButton>
       </form>
 
       <form action={updateOrganizationLogo} className="mt-6 grid gap-4 rounded-lg border border-gray-200 p-4">
@@ -74,9 +73,9 @@ export default async function ConfiguracionPage({
           />
         )}
 
-        {logo === "actualizado" && <p className="text-sm text-emerald-700">Logo actualizado correctamente.</p>}
+        {logo === "actualizado" && <Banner type="success" message="Logo actualizado correctamente." />}
         {error && (error === "logo_requerido" || error === "logo_formato_invalido" || error === "logo_muy_grande") && (
-          <p className="text-sm text-red-600">{ERROR_MESSAGES[error]}</p>
+          <Banner type="error" message={ERROR_MESSAGES[error]} />
         )}
 
         <input
@@ -87,19 +86,14 @@ export default async function ConfiguracionPage({
           className="text-sm file:mr-3 file:rounded-md file:border-0 file:bg-gray-100 file:px-3 file:py-2.5 file:text-sm file:font-medium hover:file:bg-gray-200"
         />
 
-        <button
-          type="submit"
-          className="rounded-md bg-gray-900 px-4 py-3 font-medium text-white hover:bg-gray-800"
-        >
+        <SubmitButton className="rounded-md bg-gray-900 px-4 py-3 font-medium text-white hover:bg-gray-800">
           Subir logo
-        </button>
+        </SubmitButton>
       </form>
 
       <div>
-        {ubicacion === "actualizada" && (
-          <p className="text-sm text-emerald-700">Ubicación actualizada correctamente.</p>
-        )}
-        {error === "ubicacion_invalida" && <p className="text-sm text-red-600">{ERROR_MESSAGES[error]}</p>}
+        {ubicacion === "actualizada" && <Banner type="success" message="Ubicación actualizada correctamente." />}
+        {error === "ubicacion_invalida" && <Banner type="error" message={ERROR_MESSAGES[error]} />}
         <LocationForm
           initialDepartment={organization.department}
           initialMunicipality={organization.municipality}
@@ -149,12 +143,9 @@ export default async function ConfiguracionPage({
           />
         </label>
 
-        <button
-          type="submit"
-          className="rounded-md bg-gray-900 px-4 py-3 font-medium text-white hover:bg-gray-800"
-        >
+        <SubmitButton className="rounded-md bg-gray-900 px-4 py-3 font-medium text-white hover:bg-gray-800">
           Guardar configuración
-        </button>
+        </SubmitButton>
       </form>
     </main>
   );

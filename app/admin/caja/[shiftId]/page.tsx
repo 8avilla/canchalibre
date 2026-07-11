@@ -2,11 +2,20 @@ import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
 import { adjustCashShift, resolveDispute } from "@/lib/cash/actions";
 import { requireAdminSession } from "@/lib/auth/session-guards";
+import { Banner } from "@/app/admin/Banner";
+import { SubmitButton } from "@/app/components/SubmitButton";
 
 // El acceso (ADMIN de esta org, o SUPERADMIN) ya lo garantiza app/admin/layout.tsx.
-export default async function CajaDetallePage({ params }: { params: Promise<{ shiftId: string }> }) {
+export default async function CajaDetallePage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ shiftId: string }>;
+  searchParams: Promise<{ ajustado?: string }>;
+}) {
   await requireAdminSession();
   const { shiftId } = await params;
+  const { ajustado } = await searchParams;
 
   const shift = await db.cashShift.findUnique({ where: { id: shiftId }, include: { employee: true } });
   if (!shift) {
@@ -14,9 +23,11 @@ export default async function CajaDetallePage({ params }: { params: Promise<{ sh
   }
 
   return (
-    <main className="mx-auto max-w-md px-4 py-10">
+    <main className="px-6 py-10">
       <h1 className="text-xl font-semibold">Turno de {shift.employee.name}</h1>
       <p className="text-sm text-gray-500">{shift.openedAt.toLocaleString("es-CO")}</p>
+
+      {ajustado && <div className="mt-4"><Banner type="success" message="Ajuste registrado correctamente." /></div>}
 
       <div className="mt-4 rounded-lg border border-gray-200 p-4 text-sm">
         <div className="flex justify-between">
@@ -90,19 +101,19 @@ export default async function CajaDetallePage({ params }: { params: Promise<{ sh
                 className="rounded-md border border-gray-300 px-3 py-3"
               />
             </label>
-            <button type="submit" className="rounded-md bg-gray-900 px-4 py-3 text-sm font-medium text-white">
+            <SubmitButton className="rounded-md bg-gray-900 px-4 py-3 text-sm font-medium text-white">
               Registrar ajuste
-            </button>
+            </SubmitButton>
           </form>
 
           <form action={resolveDispute} className="mt-4">
             <input type="hidden" name="shiftId" value={shift.id} />
-            <button
-              type="submit"
+            <SubmitButton
+              confirmMessage="¿Cerrar la disputa? No se puede deshacer."
               className="w-full rounded-md bg-green-600 px-4 py-3 font-medium text-white hover:bg-green-700"
             >
               Cerrar disputa
-            </button>
+            </SubmitButton>
           </form>
         </>
       )}

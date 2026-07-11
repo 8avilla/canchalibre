@@ -2,20 +2,44 @@ import { db } from "@/lib/db";
 import { BookingStatus } from "@/lib/booking/state-machine";
 import { addBusinessDays, businessDayRange, todayBusinessDate } from "@/lib/time/business-day";
 
+export interface LowStockProduct {
+  id: string;
+  name: string;
+  stock: number;
+  lowStockThreshold: number;
+}
+
+// Extraído de getDashboardMetrics para poder reutilizarlo también en /admin/alertas sin repetir el
+// filtro "stock < umbral" (que Mongo/Prisma no puede expresar como where — se compara en JS).
+export async function getLowStockProducts(orgId: string): Promise<LowStockProduct[]> {
+  const products = await db.consumptionItem.findMany({ where: { orgId, active: true } });
+
+  return products
+    .filter((product) => product.stock < product.lowStockThreshold)
+    .map((product) => ({
+      id: product.id,
+      name: product.name,
+      stock: product.stock,
+      lowStockThreshold: product.lowStockThreshold,
+    }));
+}
+
 export interface DashboardMetrics {
   bookingsByStatus: Record<string, number>;
   courtsRevenueToday: number;
   barRevenueToday: number;
-  lowStockProducts: { id: string; name: string; stock: number; lowStockThreshold: number }[];
+  lowStockProducts: LowStockProduct[];
   openShift: boolean;
 }
 
 export async function getDashboardMetrics(orgId: string): Promise<DashboardMetrics> {
   const { start, end } = businessDayRange(todayBusinessDate());
 
-  const bookings = await db.booking.findMany({
-    where: { orgId, date: { gte: start, lt: end } },
-  });
+  const [bookings, lowStockProducts, openShift] = await Promise.all([
+    db.booking.findMany({ where: { orgId, date: { gte: start, lt: end } } }),
+    getLowStockProducts(orgId),
+    db.cashShift.findFirst({ where: { orgId, status: "ABIERTO" } }),
+  ]);
 
   const bookingsByStatus: Record<string, number> = {};
   let courtsRevenueToday = 0;
@@ -29,26 +53,40 @@ export async function getDashboardMetrics(orgId: string): Promise<DashboardMetri
     }
   }
 
-  const lowStockProducts = await db.consumptionItem.findMany({
-    where: { orgId, active: true },
-  });
-
-  const openShift = (await db.cashShift.findFirst({ where: { orgId, status: "ABIERTO" } })) !== null;
-
   return {
     bookingsByStatus,
     courtsRevenueToday,
     barRevenueToday,
-    lowStockProducts: lowStockProducts
-      .filter((product) => product.stock < product.lowStockThreshold)
-      .map((product) => ({
-        id: product.id,
-        name: product.name,
-        stock: product.stock,
-        lowStockThreshold: product.lowStockThreshold,
-      })),
-    openShift,
+    lowStockProducts,
+    openShift: openShift !== null,
   };
+}
+
+export interface PendingPaymentBooking {
+  id: string;
+  venueName: string;
+  customerName: string;
+  startTime: string;
+}
+
+// Mismo scope de fecha (hoy) que getAdminAlertCounts — la lista real detrás del conteo de la
+// campanita, para /admin/alertas.
+export async function getPendingPaymentBookings(orgId: string): Promise<PendingPaymentBooking[]> {
+  const { start, end } = businessDayRange(todayBusinessDate());
+
+  const bookings = await db.booking.findMany({
+    where: { orgId, date: { gte: start, lt: end }, status: BookingStatus.PENDIENTE_PAGO },
+    include: { venue: true },
+    orderBy: { startTime: "asc" },
+    take: 20,
+  });
+
+  return bookings.map((booking) => ({
+    id: booking.id,
+    venueName: booking.venue.name,
+    customerName: booking.customerName || "Sin nombre todavía",
+    startTime: booking.startTime,
+  }));
 }
 
 export interface AdminAlertCounts {
@@ -84,6 +122,7 @@ export interface DailyRevenue {
   finalizadas: number;
   canceladas: number;
   noShow: number;
+  statusCounts: Record<string, number>;
 }
 
 export async function getRevenueReport(orgId: string, days: number): Promise<DailyRevenue[]> {
@@ -101,8 +140,11 @@ export async function getRevenueReport(orgId: string, days: number): Promise<Dai
     let finalizadas = 0;
     let canceladas = 0;
     let noShow = 0;
+    const statusCounts: Record<string, number> = {};
 
     for (const booking of bookings) {
+      statusCounts[booking.status] = (statusCounts[booking.status] ?? 0) + 1;
+
       if (booking.status === BookingStatus.FINALIZADA) {
         courtsTotal += booking.totalAmount;
         barTotal += booking.consumptionTotal;
@@ -114,8 +156,36 @@ export async function getRevenueReport(orgId: string, days: number): Promise<Dai
       }
     }
 
-    results.push({ date: dateIso, courtsTotal, barTotal, finalizadas, canceladas, noShow });
+    results.push({ date: dateIso, courtsTotal, barTotal, finalizadas, canceladas, noShow, statusCounts });
   }
 
   return results;
+}
+
+export interface PaymentMethodBreakdown {
+  cash: number;
+  transfer: number;
+  card: number;
+}
+
+// Suma lo que cada turno de caja CERRADO en el rango ya calculó como esperado por método — negocio.md
+// §4 clasifica el cierre en Efectivo/Transferencia/Datáfono, dato que hoy solo se ve turno a turno.
+export async function getPaymentMethodBreakdown(orgId: string, days: number): Promise<PaymentMethodBreakdown> {
+  const today = todayBusinessDate();
+  const { start } = businessDayRange(addBusinessDays(today, -(days - 1)));
+  const { end } = businessDayRange(today);
+
+  const shifts = await db.cashShift.findMany({
+    where: { orgId, status: "CERRADO", closedAt: { gte: start, lt: end } },
+    select: { expectedCash: true, expectedTransfer: true, expectedCard: true },
+  });
+
+  return shifts.reduce(
+    (totals, shift) => ({
+      cash: totals.cash + (shift.expectedCash ?? 0),
+      transfer: totals.transfer + (shift.expectedTransfer ?? 0),
+      card: totals.card + (shift.expectedCard ?? 0),
+    }),
+    { cash: 0, transfer: 0, card: 0 },
+  );
 }

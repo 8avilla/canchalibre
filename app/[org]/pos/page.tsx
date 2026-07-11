@@ -4,10 +4,24 @@ import { db } from "@/lib/db";
 import { requireStaffSession } from "@/lib/auth/session-guards";
 import { openCashShift } from "@/lib/pos/actions";
 import { getOpenShift, getTodayBookings } from "@/lib/pos/queries";
+import { QueryToast } from "@/app/components/QueryToast";
 import { BookingsList } from "./BookingsList";
+import { WalkInBookingForm } from "./WalkInBookingForm";
 
-export default async function PosHomePage({ params }: { params: Promise<{ org: string }> }) {
+const ERROR_MESSAGES: Record<string, string> = {
+  datos_invalidos: "Revisa los datos ingresados (nombre y WhatsApp de 10 dígitos).",
+  cupo_no_disponible: "Ese horario ya tiene una reserva.",
+};
+
+export default async function PosHomePage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ org: string }>;
+  searchParams: Promise<{ error?: string; walkin?: string }>;
+}) {
   const { org: orgSlug } = await params;
+  const { error, walkin } = await searchParams;
 
   const session = await requireStaffSession(orgSlug);
 
@@ -50,9 +64,17 @@ export default async function PosHomePage({ params }: { params: Promise<{ org: s
   }
 
   const bookings = await getTodayBookings(organization.id);
+  const venues = await db.venue.findMany({
+    where: { orgId: organization.id, active: true },
+    orderBy: { name: "asc" },
+    select: { id: true, name: true },
+  });
 
   return (
     <main className="mx-auto max-w-2xl px-4 py-10 pb-24 sm:pb-10">
+      {error && ERROR_MESSAGES[error] && <QueryToast type="error" message={ERROR_MESSAGES[error]} />}
+      {walkin === "creada" && <QueryToast type="success" message="Reserva creada correctamente." />}
+
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold">Recepción — {organization.name}</h1>
@@ -67,6 +89,8 @@ export default async function PosHomePage({ params }: { params: Promise<{ org: s
           Solicitar cierre de turno
         </Link>
       </div>
+
+      <WalkInBookingForm orgSlug={orgSlug} venues={venues} />
 
       <BookingsList
         orgSlug={orgSlug}

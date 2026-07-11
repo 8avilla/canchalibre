@@ -12,6 +12,8 @@ const STATUS_LABEL: Record<string, string> = {
   EN_CURSO: "En curso",
   FINALIZADA: "Cobrada",
   CANCELADA: "Cancelada",
+  NO_SHOW: "No se presentó",
+  EXPIRADA: "Expirada",
 };
 
 const STATUS_CLASS: Record<string, string> = {
@@ -20,6 +22,8 @@ const STATUS_CLASS: Record<string, string> = {
   EN_CURSO: "bg-blue-50 text-blue-700 ring-1 ring-inset ring-blue-200",
   FINALIZADA: "bg-gray-100 text-gray-600 ring-1 ring-inset ring-gray-200",
   CANCELADA: "bg-red-50 text-red-700 ring-1 ring-inset ring-red-200",
+  NO_SHOW: "bg-red-50 text-red-700 ring-1 ring-inset ring-red-200",
+  EXPIRADA: "bg-gray-100 text-gray-500 ring-1 ring-inset ring-gray-200",
 };
 
 export default async function MisReservasPage() {

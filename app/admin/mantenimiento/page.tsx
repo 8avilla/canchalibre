@@ -5,6 +5,8 @@ import { getDaySlots, parseDateParam, todayIso } from "@/lib/booking/availabilit
 import { requireAdminSession } from "@/lib/auth/session-guards";
 import { addBusinessDays, businessDayRange } from "@/lib/time/business-day";
 import { blockSlot, unblockSlot } from "@/lib/admin/actions";
+import { Banner } from "@/app/admin/Banner";
+import { SubmitButton } from "@/app/components/SubmitButton";
 
 const ERROR_MESSAGES: Record<string, string> = {
   horario_ocupado: "Ese horario ya tiene una reserva real, no se puede bloquear por mantenimiento.",
@@ -13,10 +15,10 @@ const ERROR_MESSAGES: Record<string, string> = {
 export default async function MantenimientoPage({
   searchParams,
 }: {
-  searchParams: Promise<{ venueId?: string; date?: string; error?: string }>;
+  searchParams: Promise<{ venueId?: string; date?: string; error?: string; bloqueado?: string; desbloqueado?: string }>;
 }) {
   const { orgSlug } = await requireAdminSession();
-  const { venueId: venueIdParam, date: dateParam, error } = await searchParams;
+  const { venueId: venueIdParam, date: dateParam, error, bloqueado, desbloqueado } = await searchParams;
 
   const organization = await db.organization.findUnique({ where: { slug: orgSlug } });
   if (!organization) {
@@ -29,7 +31,7 @@ export default async function MantenimientoPage({
 
   if (!venue) {
     return (
-      <main className="mx-auto max-w-2xl px-4 py-10">
+      <main className="px-6 py-10">
         <h1 className="text-xl font-semibold">Mantenimiento</h1>
         <p className="mt-4 text-sm text-gray-500">Crea una cancha primero en la sección Canchas.</p>
       </main>
@@ -45,7 +47,7 @@ export default async function MantenimientoPage({
   const nextDateIso = addBusinessDays(dateIso, 1);
 
   return (
-    <main className="mx-auto max-w-2xl px-4 py-10">
+    <main className="px-6 py-10">
       <h1 className="text-xl font-semibold">Mantenimiento</h1>
       <p className="mt-1 text-sm text-gray-500">
         Bloquea un horario cuando la cancha no se puede usar (luces, cancha en reparación, etc.) sin
@@ -66,9 +68,9 @@ export default async function MantenimientoPage({
         ))}
       </div>
 
-      {error && ERROR_MESSAGES[error] && (
-        <p className="mt-4 rounded-md bg-red-50 p-3 text-sm text-red-800">{ERROR_MESSAGES[error]}</p>
-      )}
+      {error && ERROR_MESSAGES[error] && <div className="mt-4"><Banner type="error" message={ERROR_MESSAGES[error]} /></div>}
+      {bloqueado && <div className="mt-4"><Banner type="success" message="Horario bloqueado correctamente." /></div>}
+      {desbloqueado && <div className="mt-4"><Banner type="success" message="Horario desbloqueado correctamente." /></div>}
 
       <div className="mt-4 flex items-center justify-between">
         <Link
@@ -110,9 +112,9 @@ export default async function MantenimientoPage({
                     <input type="hidden" name="slotBlockId" value={block.id} />
                     <input type="hidden" name="venueId" value={venue.id} />
                     <input type="hidden" name="date" value={dateIso} />
-                    <button type="submit" className="rounded-md bg-gray-900 px-3 py-2.5 text-sm text-white">
+                    <SubmitButton className="rounded-md bg-gray-900 px-3 py-2.5 text-sm text-white">
                       Desbloquear
-                    </button>
+                    </SubmitButton>
                   </form>
                 </>
               )}
@@ -127,9 +129,9 @@ export default async function MantenimientoPage({
                     placeholder="Motivo (opcional)"
                     className="flex-1 rounded-md border border-gray-300 px-2 py-2.5 text-sm"
                   />
-                  <button type="submit" className="rounded-md bg-amber-600 px-3 py-2.5 text-sm text-white">
+                  <SubmitButton className="rounded-md bg-amber-600 px-3 py-2.5 text-sm text-white">
                     Bloquear
-                  </button>
+                  </SubmitButton>
                 </form>
               )}
             </li>

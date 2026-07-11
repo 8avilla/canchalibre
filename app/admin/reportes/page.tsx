@@ -1,29 +1,112 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
-import { getRevenueReport } from "@/lib/admin/queries";
+import { getPaymentMethodBreakdown, getRevenueReport } from "@/lib/admin/queries";
 import { requireAdminSession } from "@/lib/auth/session-guards";
+import { RevenueBarChart, StatusDonutChart } from "../DashboardCharts";
 
-export default async function ReportesPage() {
+const RANGE_OPTIONS = [7, 14, 30, 90];
+const DEFAULT_DAYS = 14;
+
+export default async function ReportesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ dias?: string }>;
+}) {
   const { orgSlug } = await requireAdminSession();
+  const { dias } = await searchParams;
+  const days = RANGE_OPTIONS.includes(Number(dias)) ? Number(dias) : DEFAULT_DAYS;
 
   const organization = await db.organization.findUnique({ where: { slug: orgSlug } });
   if (!organization) {
     notFound();
   }
 
-  const report = await getRevenueReport(organization.id, 14);
+  const [report, paymentBreakdown] = await Promise.all([
+    getRevenueReport(organization.id, days),
+    getPaymentMethodBreakdown(organization.id, days),
+  ]);
+
   const totalCourts = report.reduce((sum, day) => sum + day.courtsTotal, 0);
   const totalBar = report.reduce((sum, day) => sum + day.barTotal, 0);
+  const totalPayments = paymentBreakdown.cash + paymentBreakdown.transfer + paymentBreakdown.card;
+
+  const chartData = report.map((day) => ({
+    label: day.date.slice(5).replace("-", "/"),
+    canchas: day.courtsTotal,
+    barra: day.barTotal,
+  }));
+
+  const statusTotals: Record<string, number> = {};
+  for (const day of report) {
+    for (const [status, count] of Object.entries(day.statusCounts)) {
+      statusTotals[status] = (statusTotals[status] ?? 0) + count;
+    }
+  }
+  const donutData = Object.entries(statusTotals).map(([status, count]) => ({ status, count }));
 
   return (
-    <main className="mx-auto max-w-3xl px-4 py-10">
-      <h1 className="text-xl font-semibold">Reportes — últimos 14 días</h1>
+    <main className="px-6 py-10">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-xl font-semibold">Reportes</h1>
+        <div className="flex gap-1.5">
+          {RANGE_OPTIONS.map((option) => (
+            <Link
+              key={option}
+              href={`/admin/reportes?dias=${option}`}
+              className={`rounded-md border px-2.5 py-1.5 text-xs font-medium ${
+                option === days ? "border-gray-900 bg-gray-900 text-white" : "border-gray-200 text-gray-700"
+              }`}
+            >
+              {option}d
+            </Link>
+          ))}
+        </div>
+      </div>
       <p className="mt-1 text-sm text-gray-500">
         Total canchas: ${totalCourts.toLocaleString("es-CO")} · Total barra: $
         {totalBar.toLocaleString("es-CO")}
       </p>
 
-      <div className="relative mt-6">
+      <div className="mt-6 grid gap-4 lg:grid-cols-3">
+        <div className="rounded-lg border border-gray-200 bg-white p-4 lg:col-span-2">
+          <h2 className="text-sm font-medium text-gray-700">Ingresos por día</h2>
+          <div className="mt-2">
+            <RevenueBarChart data={chartData} />
+          </div>
+        </div>
+
+        <div className="rounded-lg border border-gray-200 bg-white p-4">
+          <h2 className="text-sm font-medium text-gray-700">Reservas por estado</h2>
+          <div className="mt-3">
+            <StatusDonutChart data={donutData} />
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-4 rounded-lg border border-gray-200 bg-white p-4">
+        <h2 className="text-sm font-medium text-gray-700">Método de pago (turnos de caja cerrados)</h2>
+        {totalPayments === 0 ? (
+          <p className="mt-2 text-sm text-gray-500">Sin turnos cerrados en este rango.</p>
+        ) : (
+          <div className="mt-3 grid grid-cols-3 gap-3 text-sm">
+            <div>
+              <div className="text-gray-500">Efectivo</div>
+              <div className="font-medium text-gray-900">${paymentBreakdown.cash.toLocaleString("es-CO")}</div>
+            </div>
+            <div>
+              <div className="text-gray-500">Transferencia</div>
+              <div className="font-medium text-gray-900">${paymentBreakdown.transfer.toLocaleString("es-CO")}</div>
+            </div>
+            <div>
+              <div className="text-gray-500">Datáfono</div>
+              <div className="font-medium text-gray-900">${paymentBreakdown.card.toLocaleString("es-CO")}</div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="relative mt-4">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>

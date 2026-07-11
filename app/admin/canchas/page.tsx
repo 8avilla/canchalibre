@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { createVenue, updateVenue } from "@/lib/admin/actions";
 import { requireAdminSession } from "@/lib/auth/session-guards";
 import { getVenuePhotos } from "@/lib/venues/photos";
+import { Banner } from "@/app/admin/Banner";
 
 const VENUE_TYPE_LABEL: Record<string, string> = {
   FUTBOL_5: "Fútbol 5",
@@ -32,14 +33,12 @@ export default async function CanchasPage({
   const venues = await db.venue.findMany({ where: { orgId: organization.id }, orderBy: { name: "asc" } });
 
   return (
-    <main className="mx-auto max-w-2xl px-4 py-10">
+    <main className="px-6 py-10">
       <h1 className="text-xl font-semibold">Canchas y tarifas</h1>
 
-      {actualizado && <p className="mt-4 rounded-md bg-emerald-50 p-3 text-sm text-emerald-700">Cancha actualizada correctamente.</p>}
-      {creada && <p className="mt-4 rounded-md bg-emerald-50 p-3 text-sm text-emerald-700">Cancha creada correctamente.</p>}
-      {error && ERROR_MESSAGES[error] && (
-        <p className="mt-4 rounded-md bg-red-50 p-3 text-sm text-red-600">{ERROR_MESSAGES[error]}</p>
-      )}
+      {actualizado && <div className="mt-4"><Banner type="success" message="Cancha actualizada correctamente." /></div>}
+      {creada && <div className="mt-4"><Banner type="success" message="Cancha creada correctamente." /></div>}
+      {error && ERROR_MESSAGES[error] && <div className="mt-4"><Banner type="error" message={ERROR_MESSAGES[error]} /></div>}
 
       <ul className="mt-6 grid gap-4">
         {venues.map((venue) => {

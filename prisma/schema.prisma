@@ -57,6 +57,15 @@ enum SettlementMethod {
   DATAFONO
 }
 
+// Quién/qué disparó la cancelación (negocio.md §6.2) — para mostrarle al cliente "quién canceló" en
+// la página de confirmación y para reportes.
+enum CancelledBy {
+  CUSTOMER
+  ADMIN
+  EMPLOYEE
+  SYSTEM
+}
+
 model Organization {
   id                      String   @id @default(auto()) @map("_id") @db.ObjectId
   slug                    String   @unique
@@ -80,6 +89,7 @@ model Organization {
   consumptionItems  ConsumptionItem[]
   cashShifts        CashShift[]
   slotBlocks        SlotBlock[]
+  auditLogs         AuditLog[]
 }
 
 model User {
@@ -264,8 +274,17 @@ model Booking {
   settlementMethod SettlementMethod?
 
   expiresAt DateTime? // vence si sigue en PENDIENTE_PAGO después de esta hora
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+
+  // Cancelación (negocio.md §6.2): quién la disparó, cuándo, y el resultado de
+  // computeCancellationOutcome (dentro-de-ventana / tardía / no-show) para mostrarlo en la página de
+  // confirmación y en reportes. Nulos en reservas canceladas/expiradas/no-show anteriores a este
+  // campo (Mongo no tiene migraciones — los documentos viejos simplemente no lo tienen).
+  cancelledAt        DateTime?
+  cancelledBy        CancelledBy?
+  cancellationReason String? // "within_window" | "late_cancellation" | "no_show" | otro
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   organization     Organization      @relation(fields: [orgId], references: [id])
   venue            Venue             @relation(fields: [venueId], references: [id])
@@ -299,4 +318,21 @@ model CustomerLoginCode {
   createdAt DateTime @default(now())
 
   @@index([phone])
+}
+
+// Auditoría de acciones sensibles del admin (negocio.md: blindar contra fugas/fraude) — cambios de
+// precio, rol, stock, contraseña. Separado de CashShiftAdjustment (que ya audita disputas de caja
+// con su propio detalle) para tener una sola línea de tiempo legible de "quién hizo qué".
+model AuditLog {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  orgId       String   @db.ObjectId
+  actorUserId String   @db.ObjectId
+  actorName   String
+  action      String
+  summary     String
+  createdAt   DateTime @default(now())
+
+  organization Organization @relation(fields: [orgId], references: [id])
+
+  @@index([orgId, createdAt])
 }

@@ -9,6 +9,9 @@ export type PaymentMethod = $Enums.PaymentMethod;
 export const SettlementMethod = $Enums.SettlementMethod;
 export type SettlementMethod = $Enums.SettlementMethod;
 
+export const CancelledBy = $Enums.CancelledBy;
+export type CancelledBy = $Enums.CancelledBy;
+
 // Estados que bloquean el cupo en la agenda (negocio.md §6.1 y §6.3).
 const BLOCKING_STATUSES: ReadonlySet<BookingStatus> = new Set([
   BookingStatus.PENDIENTE_PAGO,

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
 import { requireAdminSession } from "@/lib/auth/session-guards";
+import { Banner } from "@/app/admin/Banner";
 
 const STATUS_LABEL: Record<string, string> = {
   ABIERTO: "Abierto",
@@ -11,8 +12,13 @@ const STATUS_LABEL: Record<string, string> = {
 
 // El acceso (ADMIN de esta org, o SUPERADMIN) ya lo garantiza app/admin/layout.tsx — no hace falta
 // repetir el chequeo acá (y repetirlo a mano es justo lo que dejaba a SUPERADMIN afuera antes).
-export default async function CajaAdminPage() {
+export default async function CajaAdminPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ resuelta?: string }>;
+}) {
   const { orgSlug } = await requireAdminSession();
+  const { resuelta } = await searchParams;
 
   const organization = await db.organization.findUnique({ where: { slug: orgSlug } });
   if (!organization) {
@@ -27,8 +33,10 @@ export default async function CajaAdminPage() {
   });
 
   return (
-    <main className="mx-auto max-w-2xl px-4 py-10">
+    <main className="px-6 py-10">
       <h1 className="text-xl font-semibold">Turnos de caja — {organization.name}</h1>
+
+      {resuelta && <div className="mt-4"><Banner type="success" message="Disputa resuelta correctamente." /></div>}
 
       <ul className="mt-6 grid gap-3">
         {shifts.map((shift) => (

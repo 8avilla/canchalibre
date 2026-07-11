@@ -5,6 +5,7 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { requireStaffSession, requireAdminSession } from "@/lib/auth/session-guards";
 import { NotificationService } from "@/lib/notifications";
+import { logAdminAction } from "@/lib/admin/audit";
 import { computeExpectedTotals } from "./reconciliation";
 
 const blindCountSchema = z.object({
@@ -130,7 +131,15 @@ export async function adjustCashShift(formData: FormData): Promise<void> {
     },
   });
 
-  redirect(`/admin/caja/${shift.id}`);
+  await logAdminAction({
+    orgId: shift.orgId,
+    actorUserId: session.user.id,
+    actorName: session.user.name,
+    action: "cashShift.adjust",
+    summary: `Ajustó conteo del turno ${shift.id}: $${(shift.countedCash ?? 0).toLocaleString("es-CO")} → $${parsed.data.newCountedCash.toLocaleString("es-CO")} ("${parsed.data.reason}")`,
+  });
+
+  redirect(`/admin/caja/${shift.id}?ajustado=1`);
 }
 
 export async function resolveDispute(formData: FormData): Promise<void> {
@@ -157,5 +166,13 @@ export async function resolveDispute(formData: FormData): Promise<void> {
     },
   });
 
-  redirect("/admin/caja");
+  await logAdminAction({
+    orgId: shift.orgId,
+    actorUserId: session.user.id,
+    actorName: session.user.name,
+    action: "cashShift.resolveDispute",
+    summary: `Cerró la disputa del turno ${shift.id} (diferencia final: $${(shift.discrepancy ?? 0).toLocaleString("es-CO")})`,
+  });
+
+  redirect("/admin/caja?resuelta=1");
 }

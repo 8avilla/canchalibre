@@ -2,9 +2,16 @@ import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
 import { createProduct, updateProduct, adjustStock } from "@/lib/admin/actions";
 import { requireAdminSession } from "@/lib/auth/session-guards";
+import { Banner } from "@/app/admin/Banner";
+import { SubmitButton } from "@/app/components/SubmitButton";
 
-export default async function InventarioPage() {
+export default async function InventarioPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ creado?: string; actualizado?: string }>;
+}) {
   const { orgSlug } = await requireAdminSession();
+  const { creado, actualizado } = await searchParams;
 
   const organization = await db.organization.findUnique({ where: { slug: orgSlug } });
   if (!organization) {
@@ -17,16 +24,22 @@ export default async function InventarioPage() {
   });
 
   return (
-    <main className="mx-auto max-w-2xl px-4 py-10">
+    <main className="px-6 py-10">
       <h1 className="text-xl font-semibold">Inventario</h1>
+
+      {creado && <div className="mt-4"><Banner type="success" message="Producto creado correctamente." /></div>}
+      {actualizado && <div className="mt-4"><Banner type="success" message="Producto actualizado correctamente." /></div>}
 
       <ul className="mt-6 grid gap-3">
         {products.map((product) => {
           const isLow = product.stock < product.lowStockThreshold;
+          const justUpdated = actualizado === product.id;
           return (
             <li
               key={product.id}
-              className={`rounded-lg border p-4 ${isLow ? "border-amber-300 bg-amber-50" : "border-gray-200"}`}
+              className={`rounded-lg border p-4 ${
+                justUpdated ? "border-emerald-300 bg-emerald-50/30" : isLow ? "border-amber-300 bg-amber-50" : "border-gray-200"
+              }`}
             >
               <div className="flex items-center justify-between">
                 <span className="font-medium">{product.name}</span>
@@ -68,9 +81,7 @@ export default async function InventarioPage() {
                     <option value="false">Inactivo</option>
                   </select>
                 </label>
-                <button type="submit" className="rounded-md bg-gray-900 px-3 py-3 text-sm text-white">
-                  Guardar
-                </button>
+                <SubmitButton className="rounded-md bg-gray-900 px-3 py-3 text-sm text-white">Guardar</SubmitButton>
               </form>
 
               <form action={adjustStock} className="mt-2 flex items-end gap-3">
@@ -85,9 +96,7 @@ export default async function InventarioPage() {
                     className="rounded-md border border-gray-300 px-3 py-3"
                   />
                 </label>
-                <button type="submit" className="rounded-md bg-blue-600 px-3 py-3 text-sm text-white">
-                  Aplicar
-                </button>
+                <SubmitButton className="rounded-md bg-blue-600 px-3 py-3 text-sm text-white">Aplicar</SubmitButton>
               </form>
             </li>
           );
@@ -136,9 +145,9 @@ export default async function InventarioPage() {
             className="rounded-md border border-gray-300 px-3 py-3"
           />
         </label>
-        <button type="submit" className="rounded-md bg-gray-900 px-4 py-3 text-sm font-medium text-white">
+        <SubmitButton className="rounded-md bg-gray-900 px-4 py-3 text-sm font-medium text-white">
           Crear producto
-        </button>
+        </SubmitButton>
       </form>
     </main>
   );

@@ -24,6 +24,7 @@ const NAV_ITEMS: AdminNavItem[] = [
   { href: "/reservas", label: "Reservas", icon: "📅" },
   { href: "/caja", label: "Caja", icon: "💰" },
   { href: "/usuarios", label: "Usuarios", icon: "👥" },
+  { href: "/auditoria", label: "Auditoría", icon: "🗒️" },
   { href: "/configuracion", label: "Configuración", icon: "⚙️" },
 ];
 
@@ -59,7 +60,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
           </form>
 
           <Link
-            href="/admin"
+            href="/admin/alertas"
             aria-label="Alertas"
             className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-gray-500
               hover:bg-gray-100"

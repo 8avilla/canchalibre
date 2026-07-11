@@ -77,6 +77,7 @@ export default async function AdminReservasPage({
     phone?: string;
     error?: string;
     recurrente?: string;
+    cancelada?: string;
   }>;
 }) {
   const { orgSlug } = await requireAdminSession();
@@ -90,6 +91,7 @@ export default async function AdminReservasPage({
     phone: phoneParam,
     error,
     recurrente,
+    cancelada,
   } = await searchParams;
 
   const organization = await db.organization.findUnique({ where: { slug: orgSlug } });
@@ -179,7 +181,7 @@ export default async function AdminReservasPage({
   );
 
   return (
-    <main className="mx-auto max-w-5xl px-4 py-10">
+    <main className="px-6 py-10">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h1 className="text-2xl font-semibold text-gray-900">{title}</h1>
         <p className="text-sm text-gray-500">
@@ -199,6 +201,13 @@ export default async function AdminReservasPage({
         <p className="mt-4 flex items-start gap-2 rounded-md bg-emerald-50 p-3 text-sm text-emerald-800">
           <span>✅</span>
           <span>Reserva recurrente creada: se generaron todas las ocurrencias, ya confirmadas.</span>
+        </p>
+      )}
+
+      {cancelada === "1" && (
+        <p className="mt-4 flex items-start gap-2 rounded-md bg-emerald-50 p-3 text-sm text-emerald-800">
+          <span>✅</span>
+          <span>Reserva cancelada correctamente.</span>
         </p>
       )}
 
@@ -415,6 +424,7 @@ export default async function AdminReservasPage({
                           {cancelFilterFields}
                           <SubmitButton
                             pendingLabel="Cancelando…"
+                            confirmMessage="¿Cancelar esta reserva confirmada?"
                             className="rounded-md bg-red-600 px-3 py-1.5 text-xs font-medium text-white
                               hover:bg-red-700"
                           >
@@ -450,6 +460,7 @@ export default async function AdminReservasPage({
                       {cancelFilterFields}
                       <SubmitButton
                         pendingLabel="Cancelando…"
+                        confirmMessage="¿Cancelar esta reserva confirmada?"
                         className="rounded-md bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-700"
                       >
                         Cancelar reserva
