@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
+import { db } from "@/lib/db";
 import type { Session } from "next-auth";
 
 export const ADMIN_ORG_COOKIE = "admin_org_slug";
@@ -25,10 +26,17 @@ export async function requireAdminSession(): Promise<{ session: Session; orgSlug
     redirect("/login");
   }
 
+  // Para ADMIN/EMPLOYEE no se confía en session.user.orgSlug tal cual: ese valor queda congelado en
+  // el JWT desde el login, así que si el admin le cambia el slug a su propia organización (ver
+  // updateOrganizationSlug), la sesión actual quedaría apuntando a un slug que ya no existe. orgId sí
+  // es estable, así que el slug se resuelve siempre fresco desde la base de datos.
   const orgSlug =
     session.user.role === "SUPERADMIN"
       ? ((await cookies()).get(ADMIN_ORG_COOKIE)?.value ?? null)
-      : (session.user.orgSlug ?? null);
+      : session.user.orgId
+        ? ((await db.organization.findUnique({ where: { id: session.user.orgId }, select: { slug: true } }))
+            ?.slug ?? null)
+        : null;
 
   if (!orgSlug) {
     redirect("/superadmin");

@@ -1,9 +1,10 @@
 "use server";
 
+import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
-import { requireAdminSession } from "@/lib/auth/session-guards";
+import { ADMIN_ORG_COOKIE, requireAdminSession } from "@/lib/auth/session-guards";
 import {
   BookingStatus,
   canTransition,
@@ -12,7 +13,7 @@ import {
 } from "@/lib/booking/state-machine";
 import { isValidMunicipio } from "@/lib/data/colombia";
 import { db, isUniqueConstraintError } from "@/lib/db";
-import { uploadOrganizationLogo } from "@/lib/storage/azure";
+import { uploadOrganizationLogo, uploadVenuePhoto } from "@/lib/storage/azure";
 import { addBusinessDays, businessDayStart } from "@/lib/time/business-day";
 
 const MAX_RECURRING_OCCURRENCES = 52;
@@ -51,7 +52,7 @@ export async function createVenue(formData: FormData): Promise<void> {
     notFound();
   }
 
-  await db.venue.create({
+  const venue = await db.venue.create({
     data: {
       orgId: org.id,
       name: parsed.data.name,
@@ -60,31 +61,30 @@ export async function createVenue(formData: FormData): Promise<void> {
     },
   });
 
-  redirect("/admin/canchas");
+  redirect(`/admin/canchas?creada=${venue.id}`);
 }
 
-const urlLines = z.string().transform((value) =>
-  value
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0),
-);
+const MAX_VENUE_PHOTO_SIZE_BYTES = 5 * 1024 * 1024;
+const ALLOWED_VENUE_PHOTO_TYPES = ["image/png", "image/jpeg", "image/webp"];
+const MAX_VENUE_PHOTOS = 8;
 
 const updateVenueSchema = z.object({
   venueId: z.string().min(1),
   hourlyRate: z.coerce.number().int().min(0),
-  imageUrls: urlLines.pipe(z.array(z.string().url())),
   // El orden importa: Number("") es 0 (no NaN), así que si coerce.number() fuera la primera rama,
   // un campo vacío se guardaría como capacity=0 en vez de quedar sin definir.
   capacity: z.literal("").transform(() => undefined).or(z.coerce.number().int().min(0)),
   active: z.enum(["true", "false"]),
 });
 
+// Fotos: input de archivo real (Azure Blob, mismo patrón que uploadOrganizationLogo) en vez del
+// textarea de URLs anterior — el admin no siempre tiene dónde hostear una foto para pegar el link.
+// Las existentes se muestran como miniaturas con checkbox "Eliminar" (removePhotos); las nuevas se
+// suben acá mismo y se agregan al arreglo.
 export async function updateVenue(formData: FormData): Promise<void> {
   const parsed = updateVenueSchema.safeParse({
     venueId: formData.get("venueId"),
     hourlyRate: formData.get("hourlyRate"),
-    imageUrls: formData.get("imageUrls") ?? "",
     capacity: formData.get("capacity"),
     active: formData.get("active"),
   });
@@ -94,17 +94,43 @@ export async function updateVenue(formData: FormData): Promise<void> {
 
   await requireAdminSession();
 
+  const { venueId } = parsed.data;
+  const venue = await db.venue.findUnique({ where: { id: venueId } });
+  if (!venue) {
+    notFound();
+  }
+
+  const removePhotos = new Set(formData.getAll("removePhotos").map(String));
+  const keptPhotos = venue.imageUrls.filter((url) => !removePhotos.has(url));
+
+  const newFiles = formData.getAll("photos").filter((f): f is File => f instanceof File && f.size > 0);
+
+  if (keptPhotos.length + newFiles.length > MAX_VENUE_PHOTOS) {
+    redirect("/admin/canchas?error=demasiadas_fotos");
+  }
+
+  for (const file of newFiles) {
+    if (!ALLOWED_VENUE_PHOTO_TYPES.includes(file.type)) {
+      redirect("/admin/canchas?error=foto_formato_invalido");
+    }
+    if (file.size > MAX_VENUE_PHOTO_SIZE_BYTES) {
+      redirect("/admin/canchas?error=foto_muy_grande");
+    }
+  }
+
+  const uploadedUrls = await Promise.all(newFiles.map((file) => uploadVenuePhoto(venueId, file)));
+
   await db.venue.update({
-    where: { id: parsed.data.venueId },
+    where: { id: venueId },
     data: {
       hourlyRate: parsed.data.hourlyRate,
-      imageUrls: parsed.data.imageUrls,
+      imageUrls: [...keptPhotos, ...uploadedUrls],
       capacity: parsed.data.capacity ?? null,
       active: parsed.data.active === "true",
     },
   });
 
-  redirect("/admin/canchas");
+  redirect(`/admin/canchas?actualizado=${venueId}`);
 }
 
 const createProductSchema = z.object({
@@ -237,6 +263,58 @@ export async function updateOrganizationSettings(formData: FormData): Promise<vo
   });
 
   redirect("/admin/configuracion");
+}
+
+const slugSchema = z.object({
+  slug: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .regex(/^[a-z0-9-]+$/),
+});
+
+// Cambiar el slug mueve todas las URLs públicas de la organización (/{slug}, /{slug}/pos, etc.) — el
+// admin que hace el cambio sigue viendo su propio panel sin re-loguearse porque requireAdminSession
+// resuelve el slug fresco desde orgId, no desde la sesión. Para SUPERADMIN (que "entra" vía la cookie
+// admin_org_slug) sí hace falta actualizar esa cookie a mano, o quedaría apuntando al slug viejo.
+export async function updateOrganizationSlug(formData: FormData): Promise<void> {
+  const parsed = slugSchema.safeParse({ slug: formData.get("slug") });
+  if (!parsed.success) {
+    redirect("/admin/configuracion?error=slug_invalido");
+  }
+
+  const { session, orgSlug } = await requireAdminSession();
+
+  const org = await db.organization.findUnique({ where: { slug: orgSlug } });
+  if (!org) {
+    notFound();
+  }
+
+  if (parsed.data.slug === org.slug) {
+    redirect("/admin/configuracion");
+  }
+
+  try {
+    await db.organization.update({
+      where: { id: org.id },
+      data: { slug: parsed.data.slug },
+    });
+  } catch (error) {
+    if (isUniqueConstraintError(error)) {
+      redirect("/admin/configuracion?error=slug_en_uso");
+    }
+    throw error;
+  }
+
+  if (session.user.role === "SUPERADMIN") {
+    (await cookies()).set(ADMIN_ORG_COOKIE, parsed.data.slug, {
+      httpOnly: true,
+      sameSite: "lax",
+      path: "/",
+    });
+  }
+
+  redirect("/admin/configuracion?slug=actualizado");
 }
 
 const MAX_LOGO_SIZE_BYTES = 2 * 1024 * 1024;

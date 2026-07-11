@@ -1,6 +1,4 @@
-import Image from "next/image";
 import Link from "next/link";
-import { Plus_Jakarta_Sans } from "next/font/google";
 import { db } from "@/lib/db";
 import { CLOSING_HOUR, getDaySlots, OPENING_HOUR, parseDateParam } from "@/lib/booking/availability";
 import { getVenuePhotos } from "@/lib/venues/photos";
@@ -10,16 +8,12 @@ import { HourFilterSelect } from "./HourFilterSelect";
 import { DateFilterInput } from "./DateFilterInput";
 import { SortSelect } from "./SortSelect";
 import { Footer } from "@/app/components/Footer";
+import { SiteHeader } from "@/app/components/SiteHeader";
 import { MapSection } from "./MapSection";
-import { HeaderMenu } from "./HeaderMenu";
+import { plusJakarta } from "./fonts";
 import type { VenueType } from "@/lib/generated/prisma";
 import type { MapOrganization } from "./OrganizationsMap";
 import styles from "./HomeSearch.module.css";
-
-const plusJakarta = Plus_Jakarta_Sans({
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700", "800"],
-});
 
 const TYPE_FILTERS: { value: VenueType | ""; label: string }[] = [
   { value: "", label: "Todos los deportes" },
@@ -135,20 +129,7 @@ export default async function Home({
 
   return (
     <div className={`${styles.home} ${plusJakarta.className}`}>
-      <header className={styles.header}>
-        <Link href="/" className={styles.brand}>
-          <Image src="/logo.png" alt="Cancha Libre" width={1774} height={887} priority className="h-7 w-auto" />
-        </Link>
-        <nav className={styles.headerNav}>
-          <button type="button" className={styles.navItem}>
-            ❓ <span>Ayuda</span>
-          </button>
-          <Link href="/mis-reservas" className={styles.navItem}>
-            📅 <span>Mis reservas</span>
-          </Link>
-          <HeaderMenu />
-        </nav>
-      </header>
+      <SiteHeader />
 
       <section className={styles.hero}>
         <h1>Encuentra tu cancha</h1>

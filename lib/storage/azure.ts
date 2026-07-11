@@ -3,6 +3,7 @@ import { BlobServiceClient } from "@azure/storage-blob";
 const CONNECTION_STRING = process.env.AZURE_STORAGE_CONNECTION_STRING;
 const CONTAINER_NAME = process.env.AZURE_STORAGE_DEFAULT_CONTAINER ?? "comprobantes";
 const LOGOS_CONTAINER_NAME = process.env.AZURE_STORAGE_LOGOS_CONTAINER ?? "logos";
+const VENUES_CONTAINER_NAME = process.env.AZURE_STORAGE_VENUES_CONTAINER ?? "venues";
 
 let blobServiceClient: BlobServiceClient | null = null;
 
@@ -42,6 +43,23 @@ export async function uploadOrganizationLogo(orgSlug: string, file: File): Promi
 
   const extension = file.name.includes(".") ? file.name.split(".").pop() : "bin";
   const blobName = `${orgSlug}-${Date.now()}.${extension}`;
+  const blockBlobClient = containerClient.getBlockBlobClient(blobName);
+
+  const arrayBuffer = await file.arrayBuffer();
+  await blockBlobClient.uploadData(Buffer.from(arrayBuffer), {
+    blobHTTPHeaders: { blobContentType: file.type || "application/octet-stream" },
+  });
+
+  return blockBlobClient.url;
+}
+
+export async function uploadVenuePhoto(venueId: string, file: File): Promise<string> {
+  const client = getClient();
+  const containerClient = client.getContainerClient(VENUES_CONTAINER_NAME);
+  await containerClient.createIfNotExists({ access: "blob" });
+
+  const extension = file.name.includes(".") ? file.name.split(".").pop() : "bin";
+  const blobName = `${venueId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${extension}`;
   const blockBlobClient = containerClient.getBlockBlobClient(blobName);
 
   const arrayBuffer = await file.arrayBuffer();

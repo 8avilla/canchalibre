@@ -5,9 +5,10 @@ import { headers } from "next/headers";
 import { z } from "zod";
 import { db, isUniqueConstraintError } from "@/lib/db";
 import { uploadReceipt as uploadReceiptToBlob } from "@/lib/storage/azure";
-import { businessDayStart } from "@/lib/time/business-day";
+import { businessDayStart, formatBusinessDayLabel } from "@/lib/time/business-day";
 import { checkRateLimit, getClientIp } from "@/lib/security/rate-limit";
 import { buildCheckoutPayload, isBoldConfigured, type BoldCheckoutPayload } from "@/lib/payments/bold";
+import { NotificationService } from "@/lib/notifications";
 import { BookingStatus, PaymentMethod, computeBlockingSlotKey, isContactComplete } from "./state-machine";
 
 const createBookingSchema = z.object({
@@ -227,4 +228,66 @@ export async function confirmBookingPayment(bookingId: string, boldPaymentRef?: 
       boldPaymentRef: boldPaymentRef ?? booking.boldPaymentRef,
     },
   });
+
+  await sendBookingConfirmedEmails(booking);
+}
+
+// Correo con los datos de la reserva al confirmarse el pago — al cliente (si dejó email, es
+// opcional) y en paralelo al admin del complejo (negocio.md: "notificando en paralelo a la
+// recepción"). Un fallo de Mailgun no debe tumbar la confirmación del pago, por eso va aislado.
+async function sendBookingConfirmedEmails(booking: {
+  id: string;
+  orgId: string;
+  venueId: string;
+  customerName: string;
+  customerPhone: string;
+  customerEmail: string | null;
+  date: Date;
+  startTime: string;
+  endTime: string;
+  totalAmount: number;
+  depositAmount: number;
+}): Promise<void> {
+  try {
+    const [venue, organization, admin] = await Promise.all([
+      db.venue.findUnique({ where: { id: booking.venueId } }),
+      db.organization.findUnique({ where: { id: booking.orgId } }),
+      db.user.findFirst({ where: { orgId: booking.orgId, role: "ADMIN" } }),
+    ]);
+    if (!venue || !organization) return;
+
+    const { weekday, day, month } = formatBusinessDayLabel(booking.date.toISOString().slice(0, 10));
+    const dateLabel = `${weekday} ${day} de ${month}`;
+
+    await Promise.all([
+      booking.customerEmail
+        ? NotificationService.sendBookingConfirmationEmail({
+            customerEmail: booking.customerEmail,
+            customerName: booking.customerName,
+            venueName: venue.name,
+            orgName: organization.name,
+            dateLabel,
+            startTime: booking.startTime,
+            endTime: booking.endTime,
+            totalAmount: booking.totalAmount,
+            depositAmount: booking.depositAmount,
+          })
+        : Promise.resolve(),
+      admin
+        ? NotificationService.sendNewBookingAlertEmail({
+            adminEmail: admin.email,
+            customerName: booking.customerName,
+            customerPhone: booking.customerPhone,
+            venueName: venue.name,
+            dateLabel,
+            startTime: booking.startTime,
+            endTime: booking.endTime,
+            totalAmount: booking.totalAmount,
+            depositAmount: booking.depositAmount,
+          })
+        : Promise.resolve(),
+    ]);
+  } catch (error) {
+    console.error("[booking] error enviando correos de confirmación", error);
+  }
 }

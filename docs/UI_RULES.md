@@ -1,8 +1,20 @@
 # UI Rules
 
+## Alcance
+
+Estas reglas aplican a la **plataforma pública** (home, búsqueda, página de organización/cancha,
+flujo de reserva, Mis reservas, Registrar cancha, Quienes somos, Términos y privacidad — todo lo que
+ve un jugador).
+
+**No aplican a la plataforma administrativa** (`/admin/*`, POS en `/[org]/pos/*`). Esas pantallas las
+usa personal interno (dueño, recepción) para trabajar rápido, no un cliente premium navegando — ahí
+sí puede y debe verse como un ERP: formularios densos, tablas, listas compactas, sin necesidad de
+fotografías grandes ni de cards con imagen. Prioridad ahí: velocidad y densidad de información sobre
+pulido visual. La "Regla Airbnb" (más abajo) no aplica en esas rutas.
+
 ## Filosofía
 
-La aplicación debe sentirse:
+La aplicación pública debe sentirse:
 
 - premium
 - moderna

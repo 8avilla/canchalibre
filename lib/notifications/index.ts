@@ -47,6 +47,62 @@ export const NotificationService = {
     );
   },
 
+  // Correo real (Mailgun) con los datos de la reserva confirmada — ver confirmBookingPayment en
+  // lib/booking/actions.ts. Solo se envía si el cliente dejó email (es opcional en el formulario).
+  async sendBookingConfirmationEmail(params: {
+    customerEmail: string;
+    customerName: string;
+    venueName: string;
+    orgName: string;
+    dateLabel: string;
+    startTime: string;
+    endTime: string;
+    totalAmount: number;
+    depositAmount: number;
+  }): Promise<void> {
+    await sendEmail(
+      params.customerEmail,
+      `Reserva confirmada — ${params.venueName}`,
+      `<p>Hola ${params.customerName}, tu reserva quedó confirmada.</p>
+       <ul>
+         <li>Complejo: ${params.orgName}</li>
+         <li>Cancha: ${params.venueName}</li>
+         <li>Fecha: ${params.dateLabel}</li>
+         <li>Horario: ${params.startTime} - ${params.endTime}</li>
+         <li>Total: $${params.totalAmount.toLocaleString("es-CO")}</li>
+         <li>Abono pagado: $${params.depositAmount.toLocaleString("es-CO")}</li>
+       </ul>
+       <p>Nos vemos en la cancha.</p>`,
+    );
+  },
+
+  // Aviso interno al admin del complejo — negocio.md: "notificando en paralelo a la recepción".
+  async sendNewBookingAlertEmail(params: {
+    adminEmail: string;
+    customerName: string;
+    customerPhone: string;
+    venueName: string;
+    dateLabel: string;
+    startTime: string;
+    endTime: string;
+    totalAmount: number;
+    depositAmount: number;
+  }): Promise<void> {
+    await sendEmail(
+      params.adminEmail,
+      `Nueva reserva confirmada — ${params.venueName}`,
+      `<p>Entró una reserva nueva.</p>
+       <ul>
+         <li>Cliente: ${params.customerName} (${params.customerPhone})</li>
+         <li>Cancha: ${params.venueName}</li>
+         <li>Fecha: ${params.dateLabel}</li>
+         <li>Horario: ${params.startTime} - ${params.endTime}</li>
+         <li>Total: $${params.totalAmount.toLocaleString("es-CO")}</li>
+         <li>Abono pagado: $${params.depositAmount.toLocaleString("es-CO")}</li>
+       </ul>`,
+    );
+  },
+
   // Mismo hueco que sendBookingConfirmation: hasta que existan credenciales de WhatsApp Business
   // API, el código de acceso de "Mis reservas" solo queda registrado acá (requestLoginCode además
   // devuelve el código en dev/staging para poder probar el login sin WhatsApp real).

@@ -25,9 +25,22 @@
 .home button { font-family: inherit; cursor: pointer; }
 .home img { display: block; max-width: 100%; }
 
-/* ---------- Header ---------- */
-.home .header {
-  background: var(--white);
+/* ---------- Header ----------
+   A propósito SIN el prefijo ".home" (a diferencia del resto de este archivo): el header se comparte
+   entre varias páginas (SiteHeader) que no envuelven su contenido en ".home" — solo la home real usa
+   ese wrapper para el resto de sus estilos (hero, buscador, resultados). */
+:root {
+  --sh-green-900: #14532d;
+  --sh-green-700: #15803d;
+  --sh-ink: #111827;
+  --sh-gray-100: #f3f4f6;
+  --sh-gray-200: #e5e7eb;
+  --sh-white: #ffffff;
+  --sh-radius-md: 14px;
+  --sh-shadow-float: 0 10px 30px rgba(17, 24, 39, 0.14);
+}
+.header {
+  background: var(--sh-white);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -36,24 +49,25 @@
   top: 0;
   z-index: 50;
 }
-.home .brand { display: flex; align-items: center; gap: 10px; }
-.home .headerNav { display: flex; align-items: center; gap: 28px; font-size: 15.5px; font-weight: 600; }
-.home .navItem {
+.brand { display: flex; align-items: center; gap: 10px; }
+.headerNav { display: flex; align-items: center; gap: 28px; font-size: 15.5px; font-weight: 600; }
+.navItem {
   display: flex;
   align-items: center;
   gap: 8px;
-  color: var(--ink);
+  color: var(--sh-ink);
   background: none;
   border: none;
   font-size: 15.5px;
   font-weight: 600;
+  text-decoration: none;
 }
-.home .hamburger { display: flex; flex-direction: column; gap: 5px; background: none; border: none; padding: 6px; }
-.home .hamburger span { width: 22px; height: 2.5px; background: var(--ink); border-radius: 2px; }
+.hamburger { display: flex; flex-direction: column; gap: 5px; background: none; border: none; padding: 6px; }
+.hamburger span { width: 22px; height: 2.5px; background: var(--sh-ink); border-radius: 2px; }
 
 /* ---------- Header menu (dropdown, <details>/<summary>, sin JS) ---------- */
-.home .menu { position: relative; }
-.home .menu > summary {
+.menu { position: relative; }
+.menu > summary {
   list-style: none;
   display: flex;
   flex-direction: column;
@@ -63,25 +77,25 @@
   padding: 6px;
   cursor: pointer;
 }
-.home .menu > summary::-webkit-details-marker,
-.home .menu > summary::marker {
+.menu > summary::-webkit-details-marker,
+.menu > summary::marker {
   display: none;
   content: "";
 }
-.home .menu > summary span { width: 22px; height: 2.5px; background: var(--ink); border-radius: 2px; }
-.home .menuPanel {
+.menu > summary span { width: 22px; height: 2.5px; background: var(--sh-ink); border-radius: 2px; }
+.menuPanel {
   position: absolute;
   top: calc(100% + 10px);
   right: 0;
-  background: var(--white);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-float);
+  background: var(--sh-white);
+  border-radius: var(--sh-radius-md);
+  box-shadow: var(--sh-shadow-float);
   padding: 8px;
   min-width: 230px;
   display: grid;
   z-index: 60;
 }
-.home .menuItem {
+.menuItem {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -89,11 +103,16 @@
   border-radius: 10px;
   font-size: 14.5px;
   font-weight: 600;
-  color: var(--ink);
+  color: var(--sh-ink);
   text-decoration: none;
 }
-.home .menuItem:hover { background: var(--gray-100); }
-.home .menuDivider { height: 1px; background: var(--gray-200); margin: 6px 4px; }
+.menuItem:hover { background: var(--sh-gray-100); }
+.menuDivider { height: 1px; background: var(--sh-gray-200); margin: 6px 4px; }
+
+@media (max-width: 760px) {
+  .header { padding: 12px 16px; }
+  .headerNav .navItem { display: none; }
+}
 
 /* ---------- Hero ---------- */
 .home .hero {
@@ -442,9 +461,6 @@
 }
 
 @media (max-width: 760px) {
-  .home .header { padding: 12px 16px; }
-  .home .headerNav .navItem { display: none; }
-
   .home .hero { padding: 34px 16px 30px; }
   .home .hero h1 { font-size: 28px; }
   .home .hero .sub { font-size: 14.5px; margin-top: 6px; }

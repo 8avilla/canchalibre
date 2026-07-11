@@ -1,9 +1,9 @@
 import Link from "next/link";
-import Image from "next/image";
 import { db } from "@/lib/db";
 import { getCustomerSession } from "@/lib/customer-auth/session";
 import { logoutCustomer } from "@/lib/customer-auth/actions";
 import { formatBusinessDayLabel } from "@/lib/time/business-day";
+import { SiteHeader } from "@/app/components/SiteHeader";
 import { CustomerLoginForm } from "./CustomerLoginForm";
 
 const STATUS_LABEL: Record<string, string> = {
@@ -27,12 +27,14 @@ export default async function MisReservasPage() {
 
   if (!customer) {
     return (
-      <main className="mx-auto max-w-sm px-4 py-16">
-        <Image src="/logo.png" alt="Cancha Libre" width={1774} height={887} className="h-9 w-auto" priority />
-        <h1 className="mt-6 text-xl font-semibold text-gray-900">Mis reservas</h1>
-        <p className="mt-1 text-sm text-gray-500">Ingresa con tu WhatsApp para ver tus reservas.</p>
-        <CustomerLoginForm />
-      </main>
+      <>
+        <SiteHeader />
+        <main className="mx-auto max-w-sm px-4 py-16">
+          <h1 className="text-xl font-semibold text-gray-900">Mis reservas</h1>
+          <p className="mt-1 text-sm text-gray-500">Ingresa con tu WhatsApp para ver tus reservas.</p>
+          <CustomerLoginForm />
+        </main>
+      </>
     );
   }
 
@@ -43,7 +45,9 @@ export default async function MisReservasPage() {
   });
 
   return (
-    <main className="mx-auto max-w-2xl px-4 py-10">
+    <>
+      <SiteHeader />
+      <main className="mx-auto max-w-2xl px-4 py-10">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold text-gray-900">Mis reservas</h1>
@@ -88,6 +92,7 @@ export default async function MisReservasPage() {
           </li>
         )}
       </ul>
-    </main>
+      </main>
+    </>
   );
 }

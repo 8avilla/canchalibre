@@ -6,6 +6,7 @@ import { todayBusinessDate } from "@/lib/time/business-day";
 import { getVenuePhotos } from "@/lib/venues/photos";
 import { getOrgMapEmbedSrc, getOrgMapsLink } from "@/lib/org/maps";
 import { Footer } from "@/app/components/Footer";
+import { SiteHeader } from "@/app/components/SiteHeader";
 
 const VENUE_TYPE_LABEL: Record<string, string> = {
   FUTBOL_5: "Fútbol 5",
@@ -39,6 +40,7 @@ export default async function OrganizationPage({ params }: { params: Promise<{ o
 
   return (
     <>
+      <SiteHeader />
       <main className="mx-auto max-w-2xl px-4 pb-10 lg:max-w-none lg:px-10 xl:px-16">
       <div className="border-b border-gray-100 bg-gradient-to-b from-emerald-50 to-white px-4 pt-8 pb-6 -mx-4 lg:-mx-10 lg:px-10 xl:-mx-16 xl:px-16">
         <div className="mx-auto max-w-3xl">

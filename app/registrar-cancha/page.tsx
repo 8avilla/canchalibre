@@ -1,5 +1,5 @@
-import Image from "next/image";
 import { submitVenueLead } from "@/lib/leads/actions";
+import { SiteHeader } from "@/app/components/SiteHeader";
 
 const ERROR_MESSAGES: Record<string, string> = {
   datos_invalidos: "Revisa los datos del formulario.",
@@ -20,9 +20,10 @@ export default async function RegistrarCanchaPage({
   const { enviado, error } = await searchParams;
 
   return (
-    <main className="mx-auto max-w-lg px-4 py-16">
-      <Image src="/logo.png" alt="Cancha Libre" width={1774} height={887} className="h-9 w-auto" priority />
-      <h1 className="mt-6 text-2xl font-semibold text-gray-900">Lleva tu complejo a Cancha Libre</h1>
+    <>
+      <SiteHeader />
+      <main className="mx-auto max-w-lg px-4 py-16">
+      <h1 className="text-2xl font-semibold text-gray-900">Lleva tu complejo a Cancha Libre</h1>
       <p className="mt-1 text-sm text-gray-500">Cuéntanos de tu cancha y te contactamos para sumarte.</p>
 
       <div className="mt-6 grid gap-3 sm:grid-cols-3">
@@ -78,6 +79,7 @@ export default async function RegistrarCanchaPage({
           </button>
         </form>
       )}
-    </main>
+      </main>
+    </>
   );
 }

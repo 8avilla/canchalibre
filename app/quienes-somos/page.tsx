@@ -1,12 +1,12 @@
-import Image from "next/image";
 import { Footer } from "@/app/components/Footer";
+import { SiteHeader } from "@/app/components/SiteHeader";
 
 export default function QuienesSomosPage() {
   return (
     <>
+      <SiteHeader />
       <main className="mx-auto max-w-2xl px-4 py-16">
-        <Image src="/logo.png" alt="Cancha Libre" width={1774} height={887} className="h-9 w-auto" priority />
-        <h1 className="mt-6 text-2xl font-semibold text-gray-900">Quienes somos</h1>
+        <h1 className="text-2xl font-semibold text-gray-900">Quienes somos</h1>
 
         <p className="mt-4 text-sm leading-relaxed text-gray-700">
           Cancha Libre es una plataforma de reservas para complejos deportivos. Conectamos a
