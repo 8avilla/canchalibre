@@ -29,7 +29,7 @@ export default async function OrganizationPage({ params }: { params: Promise<{ o
   }
 
   const venues = await db.venue.findMany({
-    where: { orgId: organization.id, active: true },
+    where: { orgId: organization.id, status: "ACTIVA" },
     orderBy: { name: "asc" },
   });
 

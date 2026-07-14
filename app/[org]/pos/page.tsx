@@ -65,7 +65,7 @@ export default async function PosHomePage({
 
   const bookings = await getTodayBookings(organization.id);
   const venues = await db.venue.findMany({
-    where: { orgId: organization.id, active: true },
+    where: { orgId: organization.id, status: "ACTIVA" },
     orderBy: { name: "asc" },
     select: { id: true, name: true },
   });

@@ -19,6 +19,15 @@ enum VenueType {
   PADEL
 }
 
+// Reemplaza a `Venue.active` (booleano). MANTENIMIENTO se trata igual que INACTIVA para todo lo que
+// mira disponibilidad (no reservable, no aparece en público) pero es un estado real y distinguible
+// en el panel admin en vez de derivarse de si hay bloqueos de horario vigentes.
+enum VenueStatus {
+  ACTIVA
+  MANTENIMIENTO
+  INACTIVA
+}
+
 // Máquina de estados de negocio.md §6.1
 enum BookingStatus {
   PENDIENTE_PAGO
@@ -68,6 +77,15 @@ enum CancelledBy {
   SYSTEM
 }
 
+// Motivo de la reserva, capturado solo cuando el admin la crea manualmente (drawer "Nueva reserva" /
+// wizard de recurrentes) — el flujo público del cliente siempre es PARTICULAR implícito, por eso no
+// se pide ahí.
+enum BookingType {
+  PARTICULAR
+  TORNEO
+  CLASE
+}
+
 model Organization {
   id                      String   @id @default(auto()) @map("_id") @db.ObjectId
   slug                    String   @unique
@@ -76,6 +94,11 @@ model Organization {
   country                 String   @default("Colombia")
   department              String?
   municipality            String?
+  address                 String?
+  phone                   String?
+  contactEmail            String?
+  website                 String?
+  description             String?
   latitude                Float?
   longitude               Float?
   timezone                String   @default("America/Bogota")
@@ -180,7 +203,7 @@ model Venue {
   imageUrl   String? // legado: foto única, queda solo como fallback de lectura para canchas viejas
   imageUrls  String[]  @default([])
   capacity   Int?
-  active     Boolean   @default(true)
+  status     VenueStatus @default(ACTIVA)
 
   // Canchas combinables (ej. una de Fútbol 9 que también se usa como 2 de Fútbol 7): esta cancha no
   // tiene franja física propia, reclama las de las canchas listadas acá al reservarse (ver
@@ -188,12 +211,40 @@ model Venue {
   // su propia franja.
   linkedVenueIds String[] @default([])
 
+  // Ficha de detalle (página admin/canchas/[venueId] y página pública de la cancha) — todos
+  // opcionales porque las canchas creadas antes de este campo quedan vacías hasta que el admin las
+  // completa desde el panel de edición.
+  surface           String? // "Césped sintético", "Cristal", etc.
+  coverage          String? // "Al aire libre" | "Cubierta" | "Semi-cubierta"
+  locationInComplex String? // texto libre, ej. "Zona Norte"
+  description       String? // texto libre para la página pública/detalle
+  amenities         String[] @default([]) // slugs de lib/venues/amenities.ts, reales por cancha
+
   organization      Organization       @relation(fields: [orgId], references: [id])
   bookings          Booking[]
   slotBlocks        SlotBlock[]
   recurringBookings RecurringBooking[]
+  priceRules        VenuePriceRule[]
 
   @@index([orgId])
+}
+
+// Excepción al precio por defecto (Venue.hourlyRate) para un día de la semana + rango horario
+// puntual (ej. "Sábado 18:00-22:00 → $60.000"). Sin solape permitido entre reglas de una misma
+// cancha (ver rulesOverlap en lib/booking/pricing.ts, validado al crear) — así nunca hay ambigüedad
+// sobre qué precio se cobra en un turno dado.
+model VenuePriceRule {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  venueId   String   @db.ObjectId
+  dayOfWeek Int // 0=domingo..6=sábado, coincide con Date.getUTCDay()
+  startTime String // "HH:mm", hora exacta (mismo grid que los turnos)
+  endTime   String // "HH:mm", límite superior exclusivo
+  price     Int
+  createdAt DateTime @default(now())
+
+  venue Venue @relation(fields: [venueId], references: [id])
+
+  @@index([venueId, dayOfWeek])
 }
 
 // Horario bloqueado manualmente por el admin (ej. mantenimiento, luces dañadas) — no es una
@@ -232,6 +283,9 @@ model RecurringBooking {
   startDate DateTime // primera ocurrencia
   endDate   DateTime // última ocurrencia permitida (inclusive)
 
+  bookingType BookingType?
+  notes       String?
+
   createdAt DateTime @default(now())
 
   organization Organization @relation(fields: [orgId], references: [id])
@@ -258,6 +312,10 @@ model Booking {
   endTime   String // "HH:mm"
 
   status BookingStatus @default(PENDIENTE_PAGO)
+
+  // Solo se captura cuando el admin crea la reserva manualmente (drawer/wizard) — ver BookingType.
+  bookingType BookingType?
+  notes       String?
 
   // Anti-overbooking (negocio.md §6.3): mientras el estado bloquea el cupo (PENDIENTE_PAGO/CONFIRMADA/
   // EN_CURSO) vale "<venueId>_<date>_<startTime>"; Prisma en MongoDB no soporta índices únicos

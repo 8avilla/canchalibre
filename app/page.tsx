@@ -2,7 +2,8 @@ import Link from "next/link";
 import { db } from "@/lib/db";
 import { CLOSING_HOUR, getDaySlots, OPENING_HOUR, parseDateParam } from "@/lib/booking/availability";
 import { getVenuePhotos } from "@/lib/venues/photos";
-import { VENUE_TYPE_ICON, VENUE_TYPE_LABEL, VENUE_TYPE_SERVICES } from "@/lib/venues/type-info";
+import { VENUE_TYPE_ICON, VENUE_TYPE_LABEL } from "@/lib/venues/type-info";
+import { VENUE_AMENITY_ICON, VENUE_AMENITY_LABEL } from "@/lib/venues/amenities";
 import { TypeFilterSelect } from "./TypeFilterSelect";
 import { HourFilterSelect } from "./HourFilterSelect";
 import { DateFilterInput } from "./DateFilterInput";
@@ -67,7 +68,7 @@ export default async function Home({
 
   let venues = await db.venue.findMany({
     where: {
-      active: true,
+      status: "ACTIVA",
       ...(activeType ? { type: activeType } : {}),
       ...(query
         ? {
@@ -180,7 +181,9 @@ export default async function Home({
               const [coverPhoto] = getVenuePhotos(venue);
               const slotsToday = slotsPerVenue[index];
               const availableToday = slotsToday.filter((slot) => slot.available);
-              const services = VENUE_TYPE_SERVICES[venue.type]?.slice(0, 3) ?? [];
+              const services = venue.amenities
+                .slice(0, 3)
+                .map((slug) => ({ icon: VENUE_AMENITY_ICON[slug] ?? "✓", label: VENUE_AMENITY_LABEL[slug] ?? slug }));
               const placeholder = PHOTO_PLACEHOLDERS[index % PHOTO_PLACEHOLDERS.length];
 
               const statusBadge =

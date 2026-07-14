@@ -13,6 +13,14 @@ export function todayBusinessDate(): string {
   return businessDateFromInstant(new Date());
 }
 
+// Hora actual en Bogotá como "HH:mm" — para comparar contra Booking.startTime (mismo formato) sin
+// tener que reconstruir un Date. Usado por la línea "ahora" de la agenda y por "Próximas reservas"
+// (que solo muestra turnos que aún no empezaron cuando se está viendo el día de hoy).
+export function businessTimeNow(): string {
+  const bogotaInstant = new Date(Date.now() - BUSINESS_UTC_OFFSET_HOURS * 60 * 60 * 1000);
+  return bogotaInstant.toISOString().slice(11, 16);
+}
+
 export function businessDayStart(dateIso: string): Date {
   return new Date(`${dateIso}T00:00:00.000${BUSINESS_UTC_OFFSET}`);
 }

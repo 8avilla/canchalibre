@@ -20,7 +20,7 @@ export function UpdateUserForm({
   const [activeValue, setActiveValue] = useState(active ? "true" : "false");
 
   return (
-    <form action={updateUser} className="mt-3 flex flex-wrap items-end gap-3">
+    <form action={updateUser} className="grid gap-4 sm:grid-cols-2">
       <input type="hidden" name="userId" value={userId} />
       <label className="grid gap-1 text-sm">
         Rol
@@ -28,7 +28,7 @@ export function UpdateUserForm({
           name="role"
           defaultValue={role}
           disabled={disabled}
-          className="rounded-md border border-gray-300 px-3 py-3 disabled:bg-gray-100"
+          className="rounded-md border border-gray-300 px-3 py-2.5 text-sm disabled:bg-gray-100"
         >
           <option value="ADMIN">Administrador</option>
           <option value="EMPLOYEE">Empleado</option>
@@ -41,19 +41,28 @@ export function UpdateUserForm({
           value={activeValue}
           onChange={(e) => setActiveValue(e.target.value)}
           disabled={disabled}
-          className="rounded-md border border-gray-300 px-3 py-3 disabled:bg-gray-100"
+          className="rounded-md border border-gray-300 px-3 py-2.5 text-sm disabled:bg-gray-100"
         >
           <option value="true">Activo</option>
           <option value="false">Inactivo</option>
         </select>
       </label>
-      <SubmitButton
-        disabled={disabled}
-        confirmMessage={activeValue === "false" ? "¿Desactivar a este usuario? No podrá volver a iniciar sesión." : undefined}
-        className="rounded-md bg-gray-900 px-3 py-3 text-sm text-white disabled:opacity-40"
-      >
-        Guardar
-      </SubmitButton>
+
+      {disabled && (
+        <p className="col-span-2 text-xs text-gray-400">
+          No puedes cambiar tu propio rol ni desactivar tu propia cuenta.
+        </p>
+      )}
+
+      <div className="col-span-2">
+        <SubmitButton
+          disabled={disabled}
+          confirmMessage={activeValue === "false" ? "¿Desactivar a este usuario? No podrá volver a iniciar sesión." : undefined}
+          className="rounded-md bg-gray-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-gray-800 disabled:opacity-40"
+        >
+          Guardar cambios
+        </SubmitButton>
+      </div>
     </form>
   );
 }

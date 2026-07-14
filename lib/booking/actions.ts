@@ -10,6 +10,7 @@ import { checkRateLimit, getClientIp } from "@/lib/security/rate-limit";
 import { buildCheckoutPayload, isBoldConfigured, type BoldCheckoutPayload } from "@/lib/payments/bold";
 import { getCustomerSession } from "@/lib/customer-auth/session";
 import { NotificationService } from "@/lib/notifications";
+import { resolveVenuePrice } from "./pricing";
 import { buildSlotLockKeys, getVenueUnitIds, releaseSlotLocks } from "./slot-locks";
 import {
   BookingStatus,
@@ -78,14 +79,15 @@ export async function createBookingShell(input: {
     notFound();
   }
 
-  const venue = await db.venue.findUnique({ where: { id: data.venueId } });
-  if (!venue || venue.orgId !== org.id || !venue.active) {
+  const venue = await db.venue.findUnique({ where: { id: data.venueId }, include: { priceRules: true } });
+  if (!venue || venue.orgId !== org.id || venue.status !== "ACTIVA") {
     notFound();
   }
 
   const dateObj = businessDayStart(data.date);
   const blockingSlotKey = computeBlockingSlotKey(venue.id, dateObj, data.startTime);
-  const depositAmount = Math.round((venue.hourlyRate * org.depositPercentage) / 100);
+  const price = resolveVenuePrice(venue, venue.priceRules, data.date, data.startTime);
+  const depositAmount = Math.round((price * org.depositPercentage) / 100);
   const expiresAt = new Date(Date.now() + org.bookingHoldMinutes * 60_000);
 
   const bookingData = {
@@ -98,33 +100,29 @@ export async function createBookingShell(input: {
     endTime: data.endTime,
     status: BookingStatus.PENDIENTE_PAGO,
     blockingSlotKey,
-    totalAmount: venue.hourlyRate,
+    totalAmount: price,
     depositAmount,
     expiresAt,
   };
 
-  // Cancha combinable (ej. Fútbol 9 armada sobre 2 de Fútbol 7, ver Venue.linkedVenueIds): además
-  // de su propia reserva, reclama la franja física de cada cancha con la que combina — todo o nada
-  // dentro de una transacción (mismo patrón que createRecurringBooking en lib/admin/actions.ts). Una
-  // cancha normal (el caso de siempre) sigue exactamente el mismo camino de antes, sin transacción.
+  // Reclama la franja física de esta cancha y, si combina con otras (Venue.linkedVenueIds, ej.
+  // Fútbol 9 armada sobre 2 de Fútbol 7), también las de esas — siempre dentro de una transacción,
+  // nunca solo la reserva sola. Antes esto se saltaba para canchas "atómicas" (sin combinar), lo que
+  // dejaba un hueco real: una cancha compuesta que reclama esta franja vía SlotLock nunca chocaba
+  // contra el Booking.blockingSlotKey de esta cancha (son índices únicos de colecciones distintas),
+  // así que ambas podían reservarse la misma hora sin que ninguna rechazara a la otra.
   const unitIds = getVenueUnitIds(venue);
-  const isCombinable = !(unitIds.length === 1 && unitIds[0] === venue.id);
+  const slotLockKeys = buildSlotLockKeys(unitIds, dateObj, data.startTime);
 
   let bookingId: string;
   try {
-    if (!isCombinable) {
-      const booking = await db.booking.create({ data: bookingData });
-      bookingId = booking.id;
-    } else {
-      const slotLockKeys = buildSlotLockKeys(unitIds, dateObj, data.startTime);
-      bookingId = await db.$transaction(async (tx) => {
-        const booking = await tx.booking.create({ data: bookingData });
-        for (const key of slotLockKeys) {
-          await tx.slotLock.create({ data: { key, bookingId: booking.id } });
-        }
-        return booking.id;
-      });
-    }
+    bookingId = await db.$transaction(async (tx) => {
+      const booking = await tx.booking.create({ data: bookingData });
+      for (const key of slotLockKeys) {
+        await tx.slotLock.create({ data: { key, bookingId: booking.id } });
+      }
+      return booking.id;
+    });
   } catch (error) {
     if (isUniqueConstraintError(error)) {
       return { ok: false, error: "cupo_no_disponible" };
@@ -141,7 +139,7 @@ export async function createBookingShell(input: {
       })
     : null;
 
-  return { ok: true, bookingId, totalAmount: venue.hourlyRate, depositAmount, boldPayload };
+  return { ok: true, bookingId, totalAmount: price, depositAmount, boldPayload };
 }
 
 const updateContactSchema = z.object({

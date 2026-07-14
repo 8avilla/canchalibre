@@ -4,7 +4,8 @@ import { getDaySlots, parseDateParam, todayIso } from "@/lib/booking/availabilit
 import { formatBusinessDayLabel } from "@/lib/time/business-day";
 import { getOrgMapEmbedSrc, getOrgMapsLink } from "@/lib/org/maps";
 import { getVenuePhotos } from "@/lib/venues/photos";
-import { VENUE_TYPE_ICON, VENUE_TYPE_LABEL, VENUE_TYPE_SERVICES, VENUE_TYPE_SURFACE } from "@/lib/venues/type-info";
+import { VENUE_TYPE_ICON, VENUE_TYPE_LABEL } from "@/lib/venues/type-info";
+import { VENUE_AMENITY_ICON, VENUE_AMENITY_LABEL } from "@/lib/venues/amenities";
 import { AvailabilityGrid } from "./AvailabilityGrid";
 import { BackButton } from "./BackButton";
 import { DaySelector } from "./DaySelector";
@@ -36,21 +37,34 @@ export default async function VenuePage({
   const slots = await getDaySlots(venue.id, dateIso);
   const { weekday, day, month } = formatBusinessDayLabel(dateIso);
   const photos = getVenuePhotos(venue);
-  const services = VENUE_TYPE_SERVICES[venue.type] ?? [];
-  const surfaceLabel = VENUE_TYPE_SURFACE[venue.type];
-  const hasService = (keyword: string) => services.some((s) => s.label.toLowerCase().includes(keyword));
+  const services = venue.amenities.map((slug) => ({
+    icon: VENUE_AMENITY_ICON[slug] ?? "✓",
+    label: VENUE_AMENITY_LABEL[slug] ?? slug,
+  }));
+  const surfaceLabel = venue.surface ?? undefined;
 
-  // Texto generado a partir de datos reales (tipo, superficie, servicios de referencia por tipo de
-  // cancha) en vez de una descripción fija por cancha — ese campo no existe todavía en el modelo.
-  const description = `Cancha ${surfaceLabel ? surfaceLabel.toLowerCase() : "deportiva"} profesional, ideal para partidos de ${
-    VENUE_TYPE_LABEL[venue.type] ?? venue.type
-  }.${services.length > 0 ? ` Cuenta con ${services.map((s) => s.label.toLowerCase()).join(", ")}.` : ""}`;
+  // Usa la descripción real cargada por el admin; si todavía no la completó, arma una a partir de
+  // los datos reales que sí existen (tipo, superficie, características) en vez de texto inventado.
+  const description =
+    venue.description?.trim() ||
+    `Cancha ${surfaceLabel ? surfaceLabel.toLowerCase() : "deportiva"} profesional, ideal para partidos de ${
+      VENUE_TYPE_LABEL[venue.type] ?? venue.type
+    }.${services.length > 0 ? ` Cuenta con ${services.map((s) => s.label.toLowerCase()).join(", ")}.` : ""}`;
 
   const specs = [
     { icon: "⚽", label: "Deporte", value: VENUE_TYPE_LABEL[venue.type] ?? venue.type },
     ...(surfaceLabel ? [{ icon: "▱", label: "Superficie", value: surfaceLabel }] : []),
-    { icon: "💡", label: "Iluminación", value: hasService("iluminación") ? "Sí" : "No" },
-    { icon: "🅿️", label: "Estacionamiento", value: hasService("parqueadero") ? "Sí" : "No" },
+    ...(venue.coverage ? [{ icon: "☂️", label: "Cobertura", value: venue.coverage }] : []),
+    {
+      icon: "💡",
+      label: "Iluminación",
+      value: venue.amenities.includes("iluminacion_led") ? "Sí" : "No",
+    },
+    {
+      icon: "🅿️",
+      label: "Estacionamiento",
+      value: venue.amenities.includes("parqueadero") ? "Sí" : "No",
+    },
   ];
 
   const orgLocationLabel =
@@ -76,9 +90,9 @@ export default async function VenuePage({
               <span className="rounded-full bg-white/90 px-2.5 py-1 text-xs font-medium text-gray-700">
                 {VENUE_TYPE_ICON[venue.type] ?? "🏟️"} {VENUE_TYPE_LABEL[venue.type] ?? venue.type}
               </span>
-              {VENUE_TYPE_SURFACE[venue.type] && (
+              {surfaceLabel && (
                 <span className="rounded-full bg-white/90 px-2.5 py-1 text-xs font-medium text-gray-700">
-                  {VENUE_TYPE_SURFACE[venue.type]}
+                  {surfaceLabel}
                 </span>
               )}
             </div>
@@ -123,7 +137,6 @@ export default async function VenuePage({
             orgSlug={orgSlug}
             venueId={venue.id}
             dateIso={dateIso}
-            hourlyRate={venue.hourlyRate}
             initialSlots={slots}
           />
 

@@ -6,7 +6,10 @@ import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { ADMIN_ORG_COOKIE, requireAdminSession } from "@/lib/auth/session-guards";
 import { notifyBookingCancelled } from "@/lib/booking/actions";
-import { releaseSlotLocks } from "@/lib/booking/slot-locks";
+import { OPENING_HOUR, CLOSING_HOUR } from "@/lib/booking/availability";
+import { DAY_OF_WEEK_LABEL, resolveVenuePrice, rulesOverlap } from "@/lib/booking/pricing";
+import { buildWeeklyOccurrenceDates, MAX_RECURRING_OCCURRENCES } from "@/lib/booking/recurrence";
+import { buildSlotLockKeys, getVenueUnitIds, releaseSlotLocks } from "@/lib/booking/slot-locks";
 import {
   BookingStatus,
   CancelledBy,
@@ -14,14 +17,14 @@ import {
   computeBlockingSlotKey,
   computeCancellationOutcome,
   computeReleasedSlotKey,
+  isValidCustomerName,
+  isValidCustomerPhone,
 } from "@/lib/booking/state-machine";
 import { isValidMunicipio } from "@/lib/data/colombia";
 import { db, isUniqueConstraintError } from "@/lib/db";
 import { uploadOrganizationLogo, uploadVenuePhoto } from "@/lib/storage/azure";
-import { addBusinessDays, businessDateTimeInstant, businessDayStart } from "@/lib/time/business-day";
+import { businessDateTimeInstant, businessDayStart } from "@/lib/time/business-day";
 import { logAdminAction } from "./audit";
-
-const MAX_RECURRING_OCCURRENCES = 52;
 
 // Resuelve el orgId real a partir del slug de la URL en vez de confiar en session.user.orgId — ese
 // campo es undefined para SUPERADMIN (no pertenece a ninguna organización, pero sí puede operar
@@ -75,12 +78,21 @@ const MAX_VENUE_PHOTOS = 8;
 
 const updateVenueSchema = z.object({
   venueId: z.string().min(1),
+  // Opcionales con fallback al valor actual de la cancha (ver más abajo): así un form que solo edita
+  // fotos, por ejemplo, no necesita repetir todos los campos para no perderlos.
+  name: z.string().trim().min(2).optional(),
+  type: z.enum(["FUTBOL_5", "FUTBOL_7", "FUTBOL_8", "FUTBOL_9", "PADEL"]).optional(),
   hourlyRate: z.coerce.number().int().min(0),
   // El orden importa: Number("") es 0 (no NaN), así que si coerce.number() fuera la primera rama,
   // un campo vacío se guardaría como capacity=0 en vez de quedar sin definir.
   capacity: z.literal("").transform(() => undefined).or(z.coerce.number().int().min(0)),
-  active: z.enum(["true", "false"]),
+  status: z.enum(["ACTIVA", "MANTENIMIENTO", "INACTIVA"]),
   linkedVenueIds: z.array(z.string()).default([]),
+  surface: z.string().trim().optional(),
+  coverage: z.string().trim().optional(),
+  locationInComplex: z.string().trim().optional(),
+  description: z.string().trim().optional(),
+  amenities: z.array(z.string()).default([]),
 });
 
 // Fotos: input de archivo real (Azure Blob, mismo patrón que uploadOrganizationLogo) en vez del
@@ -90,10 +102,17 @@ const updateVenueSchema = z.object({
 export async function updateVenue(formData: FormData): Promise<void> {
   const parsed = updateVenueSchema.safeParse({
     venueId: formData.get("venueId"),
+    name: formData.get("name") || undefined,
+    type: formData.get("type") || undefined,
     hourlyRate: formData.get("hourlyRate"),
     capacity: formData.get("capacity"),
-    active: formData.get("active"),
+    status: formData.get("status"),
     linkedVenueIds: formData.getAll("linkedVenueIds"),
+    surface: formData.get("surface") ?? undefined,
+    coverage: formData.get("coverage") ?? undefined,
+    locationInComplex: formData.get("locationInComplex") ?? undefined,
+    description: formData.get("description") ?? undefined,
+    amenities: formData.getAll("amenities"),
   });
   if (!parsed.success) {
     notFound();
@@ -125,15 +144,15 @@ export async function updateVenue(formData: FormData): Promise<void> {
   const newFiles = formData.getAll("photos").filter((f): f is File => f instanceof File && f.size > 0);
 
   if (keptPhotos.length + newFiles.length > MAX_VENUE_PHOTOS) {
-    redirect("/admin/canchas?error=demasiadas_fotos");
+    redirect(`/admin/canchas/${venueId}?error=demasiadas_fotos`);
   }
 
   for (const file of newFiles) {
     if (!ALLOWED_VENUE_PHOTO_TYPES.includes(file.type)) {
-      redirect("/admin/canchas?error=foto_formato_invalido");
+      redirect(`/admin/canchas/${venueId}?error=foto_formato_invalido`);
     }
     if (file.size > MAX_VENUE_PHOTO_SIZE_BYTES) {
-      redirect("/admin/canchas?error=foto_muy_grande");
+      redirect(`/admin/canchas/${venueId}?error=foto_muy_grande`);
     }
   }
 
@@ -152,15 +171,155 @@ export async function updateVenue(formData: FormData): Promise<void> {
   await db.venue.update({
     where: { id: venueId },
     data: {
+      name: parsed.data.name || venue.name,
+      type: parsed.data.type || venue.type,
       hourlyRate: parsed.data.hourlyRate,
       imageUrls: [...keptPhotos, ...uploadedUrls],
       capacity: parsed.data.capacity ?? null,
-      active: parsed.data.active === "true",
+      status: parsed.data.status,
       linkedVenueIds,
+      surface: parsed.data.surface || null,
+      coverage: parsed.data.coverage || null,
+      locationInComplex: parsed.data.locationInComplex || null,
+      description: parsed.data.description || null,
+      amenities: parsed.data.amenities,
     },
   });
 
-  redirect(`/admin/canchas?actualizado=${venueId}`);
+  redirect(`/admin/canchas/${venueId}?actualizado=1`);
+}
+
+const setVenueStatusSchema = z.object({
+  venueId: z.string().min(1),
+  status: z.enum(["ACTIVA", "MANTENIMIENTO", "INACTIVA"]),
+});
+
+// Atajo del dropdown "Más acciones" en la página de detalle — cambia solo el estado, sin pasar por
+// el form completo de edición (que exige tarifa/capacidad/etc.).
+export async function setVenueStatus(formData: FormData): Promise<void> {
+  const parsed = setVenueStatusSchema.safeParse({
+    venueId: formData.get("venueId"),
+    status: formData.get("status"),
+  });
+  if (!parsed.success) {
+    notFound();
+  }
+
+  const { session } = await requireAdminSession();
+
+  const venue = await db.venue.findUnique({ where: { id: parsed.data.venueId } });
+  if (!venue) {
+    notFound();
+  }
+
+  await db.venue.update({ where: { id: venue.id }, data: { status: parsed.data.status } });
+
+  const STATUS_LABEL: Record<string, string> = { ACTIVA: "Activa", MANTENIMIENTO: "Mantenimiento", INACTIVA: "Inactiva" };
+  await logAdminAction({
+    orgId: venue.orgId,
+    actorUserId: session.user.id,
+    actorName: session.user.name,
+    action: "venue.setStatus",
+    summary: `Cambió estado de ${venue.name} de ${STATUS_LABEL[venue.status]} a ${STATUS_LABEL[parsed.data.status]}`,
+  });
+
+  redirect(`/admin/canchas/${venue.id}?actualizado=1`);
+}
+
+const createPriceRuleSchema = z.object({
+  venueId: z.string().min(1),
+  dayOfWeek: z.coerce.number().int().min(0).max(6),
+  startTime: z.string().regex(/^\d{2}:00$/),
+  endTime: z.string().regex(/^\d{2}:00$/),
+  price: z.coerce.number().int().min(0),
+});
+
+// Excepción de precio para la pestaña "Precios" de la página de detalle (día + rango horario +
+// precio). Sin solape permitido con otra excepción de la misma cancha/día — el guardado se rechaza
+// en vez de definir una regla de desempate (ver rulesOverlap, lib/booking/pricing.ts).
+export async function createVenuePriceRule(formData: FormData): Promise<void> {
+  const parsed = createPriceRuleSchema.safeParse({
+    venueId: formData.get("venueId"),
+    dayOfWeek: formData.get("dayOfWeek"),
+    startTime: formData.get("startTime"),
+    endTime: formData.get("endTime"),
+    price: formData.get("price"),
+  });
+  if (!parsed.success) {
+    notFound();
+  }
+
+  const { session, orgSlug } = await requireAdminSession();
+
+  const org = await db.organization.findUnique({ where: { slug: orgSlug } });
+  if (!org) {
+    notFound();
+  }
+
+  const { venueId, dayOfWeek, startTime, endTime, price } = parsed.data;
+
+  const venue = await db.venue.findUnique({ where: { id: venueId } });
+  if (!venue || venue.orgId !== org.id) {
+    notFound();
+  }
+
+  const startHour = Number(startTime.slice(0, 2));
+  const endHour = Number(endTime.slice(0, 2));
+  if (endTime <= startTime || startHour < OPENING_HOUR || endHour > CLOSING_HOUR) {
+    redirect(`/admin/canchas/${venueId}?tab=precios&error=precio_rango_invalido`);
+  }
+
+  const existingRules = await db.venuePriceRule.findMany({ where: { venueId, dayOfWeek } });
+  if (existingRules.some((rule) => rulesOverlap(rule, { dayOfWeek, startTime, endTime }))) {
+    redirect(`/admin/canchas/${venueId}?tab=precios&error=precio_solapado`);
+  }
+
+  await db.venuePriceRule.create({ data: { venueId, dayOfWeek, startTime, endTime, price } });
+
+  await logAdminAction({
+    orgId: venue.orgId,
+    actorUserId: session.user.id,
+    actorName: session.user.name,
+    action: "venue.addPriceRule",
+    summary: `Agregó excepción de precio a ${venue.name}: ${DAY_OF_WEEK_LABEL[dayOfWeek]} ${startTime}-${endTime} → $${price.toLocaleString("es-CO")}`,
+  });
+
+  redirect(`/admin/canchas/${venueId}?tab=precios&actualizado=1`);
+}
+
+// deleteMany en vez de "buscar, verificar dueño, borrar" — el filtro { id, venueId } ya hace de
+// verificación de pertenencia en una sola operación atómica, sin condición de carrera entre pasos.
+export async function deleteVenuePriceRule(formData: FormData): Promise<void> {
+  const venueId = String(formData.get("venueId") ?? "");
+  const ruleId = String(formData.get("ruleId") ?? "");
+  if (!venueId || !ruleId) {
+    notFound();
+  }
+
+  const { session, orgSlug } = await requireAdminSession();
+
+  const org = await db.organization.findUnique({ where: { slug: orgSlug } });
+  if (!org) {
+    notFound();
+  }
+
+  const venue = await db.venue.findUnique({ where: { id: venueId } });
+  if (!venue || venue.orgId !== org.id) {
+    notFound();
+  }
+
+  const { count } = await db.venuePriceRule.deleteMany({ where: { id: ruleId, venueId } });
+  if (count > 0) {
+    await logAdminAction({
+      orgId: venue.orgId,
+      actorUserId: session.user.id,
+      actorName: session.user.name,
+      action: "venue.removePriceRule",
+      summary: `Eliminó una excepción de precio de ${venue.name}`,
+    });
+  }
+
+  redirect(`/admin/canchas/${venueId}?tab=precios&actualizado=1`);
 }
 
 const createProductSchema = z.object({
@@ -300,7 +459,68 @@ export async function updateOrganizationSettings(formData: FormData): Promise<vo
     },
   });
 
-  redirect("/admin/configuracion");
+  redirect("/admin/configuracion?tab=horarios&settings=actualizado");
+}
+
+const infoSchema = z.object({
+  name: z.string().trim().min(2).max(200),
+  address: z.string().trim().min(1).max(300),
+  phone: z.string().trim().max(50).optional(),
+  contactEmail: z.string().trim().email(),
+  website: z.string().trim().max(200).optional(),
+  description: z.string().trim().max(300).optional(),
+  department: z.string().min(1),
+  municipality: z.string().min(1),
+  // Punto exacto del complejo en el mapa (LocationMapPicker) — separado de departamento/municipio,
+  // que solo describen la región. Sin esto no hay pin que mostrar en el buscador principal.
+  latitude: z.coerce.number().min(-90).max(90),
+  longitude: z.coerce.number().min(-180).max(180),
+});
+
+// Datos de identidad y ubicación del complejo (tab "Información general", una sola card visual):
+// separado de updateOrganizationSlug y updateOrganizationLogo porque esos dos tienen su propia
+// validación/consecuencias (URLs públicas, upload de archivo) y conviene poder guardarlos
+// independientemente de este formulario.
+export async function updateOrganizationInfo(formData: FormData): Promise<void> {
+  const parsed = infoSchema.safeParse({
+    name: formData.get("name"),
+    address: formData.get("address"),
+    phone: formData.get("phone") || undefined,
+    contactEmail: formData.get("contactEmail"),
+    website: formData.get("website") || undefined,
+    description: formData.get("description") || undefined,
+    department: formData.get("department"),
+    municipality: formData.get("municipality"),
+    latitude: formData.get("latitude"),
+    longitude: formData.get("longitude"),
+  });
+  if (!parsed.success) {
+    redirect("/admin/configuracion?tab=general&error=datos_invalidos");
+  }
+
+  const { orgSlug } = await requireAdminSession();
+
+  if (!isValidMunicipio(parsed.data.department, parsed.data.municipality)) {
+    redirect("/admin/configuracion?tab=general&error=ubicacion_invalida");
+  }
+
+  await db.organization.update({
+    where: { slug: orgSlug },
+    data: {
+      name: parsed.data.name,
+      address: parsed.data.address,
+      phone: parsed.data.phone || null,
+      contactEmail: parsed.data.contactEmail,
+      website: parsed.data.website || null,
+      description: parsed.data.description || null,
+      department: parsed.data.department,
+      municipality: parsed.data.municipality,
+      latitude: parsed.data.latitude,
+      longitude: parsed.data.longitude,
+    },
+  });
+
+  redirect("/admin/configuracion?tab=general&info=actualizada");
 }
 
 const slugSchema = z.object({
@@ -318,7 +538,7 @@ const slugSchema = z.object({
 export async function updateOrganizationSlug(formData: FormData): Promise<void> {
   const parsed = slugSchema.safeParse({ slug: formData.get("slug") });
   if (!parsed.success) {
-    redirect("/admin/configuracion?error=slug_invalido");
+    redirect("/admin/configuracion?tab=seguridad&error=slug_invalido");
   }
 
   const { session, orgSlug } = await requireAdminSession();
@@ -329,7 +549,7 @@ export async function updateOrganizationSlug(formData: FormData): Promise<void> 
   }
 
   if (parsed.data.slug === org.slug) {
-    redirect("/admin/configuracion");
+    redirect("/admin/configuracion?tab=seguridad");
   }
 
   try {
@@ -339,7 +559,7 @@ export async function updateOrganizationSlug(formData: FormData): Promise<void> 
     });
   } catch (error) {
     if (isUniqueConstraintError(error)) {
-      redirect("/admin/configuracion?error=slug_en_uso");
+      redirect("/admin/configuracion?tab=seguridad&error=slug_en_uso");
     }
     throw error;
   }
@@ -352,7 +572,7 @@ export async function updateOrganizationSlug(formData: FormData): Promise<void> 
     });
   }
 
-  redirect("/admin/configuracion?slug=actualizado");
+  redirect("/admin/configuracion?tab=seguridad&slug=actualizado");
 }
 
 const MAX_LOGO_SIZE_BYTES = 2 * 1024 * 1024;
@@ -363,15 +583,15 @@ export async function updateOrganizationLogo(formData: FormData): Promise<void> 
 
   const file = formData.get("logo");
   if (!(file instanceof File) || file.size === 0) {
-    redirect("/admin/configuracion?error=logo_requerido");
+    redirect("/admin/configuracion?tab=general&error=logo_requerido");
   }
 
   if (!ALLOWED_LOGO_TYPES.includes(file.type)) {
-    redirect("/admin/configuracion?error=logo_formato_invalido");
+    redirect("/admin/configuracion?tab=general&error=logo_formato_invalido");
   }
 
   if (file.size > MAX_LOGO_SIZE_BYTES) {
-    redirect("/admin/configuracion?error=logo_muy_grande");
+    redirect("/admin/configuracion?tab=general&error=logo_muy_grande");
   }
 
   const logoUrl = await uploadOrganizationLogo(orgSlug, file as File);
@@ -381,43 +601,7 @@ export async function updateOrganizationLogo(formData: FormData): Promise<void> 
     data: { logoUrl },
   });
 
-  redirect("/admin/configuracion?logo=actualizado");
-}
-
-const updateLocationSchema = z.object({
-  department: z.string().min(1),
-  municipality: z.string().min(1),
-  // Punto exacto del complejo en el mapa (LocationMapPicker) — separado de departamento/municipio,
-  // que solo describen la región. Sin esto no hay pin que mostrar en el buscador principal.
-  latitude: z.coerce.number().min(-90).max(90),
-  longitude: z.coerce.number().min(-180).max(180),
-});
-
-export async function updateOrganizationLocation(formData: FormData): Promise<void> {
-  const parsed = updateLocationSchema.safeParse({
-    department: formData.get("department"),
-    municipality: formData.get("municipality"),
-    latitude: formData.get("latitude"),
-    longitude: formData.get("longitude"),
-  });
-  if (!parsed.success) {
-    redirect("/admin/configuracion?error=ubicacion_invalida");
-  }
-
-  const { department, municipality, latitude, longitude } = parsed.data;
-
-  const { orgSlug } = await requireAdminSession();
-
-  if (!isValidMunicipio(department, municipality)) {
-    redirect("/admin/configuracion?error=ubicacion_invalida");
-  }
-
-  await db.organization.update({
-    where: { slug: orgSlug },
-    data: { department, municipality, latitude, longitude },
-  });
-
-  redirect("/admin/configuracion?ubicacion=actualizada");
+  redirect("/admin/configuracion?tab=general&logo=actualizado");
 }
 
 const optionalDateOrEmpty = z
@@ -435,6 +619,10 @@ const cancelBookingSchema = z.object({
   status: z.string().min(1).optional(),
   name: z.string().min(1).optional(),
   phone: z.string().min(1).optional(),
+  // Solo presentes cuando se cancela desde la vista agenda (kebab de "Próximas reservas") — para
+  // volver al mismo día que se estaba viendo en vez de resetear a la vista lista de "hoy".
+  vista: z.string().min(1).optional(),
+  fecha: optionalDateOrEmpty,
 });
 
 // negocio.md §6.4: "Cancelar reserva confirmada" — el empleado no puede, solo el ADMIN.
@@ -448,6 +636,8 @@ export async function cancelConfirmedBooking(formData: FormData): Promise<void> 
     status: formData.get("status") ?? undefined,
     name: formData.get("name") ?? undefined,
     phone: formData.get("phone") ?? undefined,
+    vista: formData.get("vista") ?? undefined,
+    fecha: formData.get("fecha") ?? undefined,
   });
   if (!parsed.success) {
     notFound();
@@ -500,6 +690,12 @@ export async function cancelConfirmedBooking(formData: FormData): Promise<void> 
   // tipo, estado) en vez de resetear siempre a "hoy sin filtros". dateFrom/dateTo se preservan
   // aunque vengan vacíos ("" = sin límite en ese extremo) para no perder un "todas las fechas".
   const query = new URLSearchParams();
+  if (parsed.data.vista) {
+    query.set("vista", parsed.data.vista);
+  }
+  if (parsed.data.fecha) {
+    query.set("fecha", parsed.data.fecha);
+  }
   if (parsed.data.dateFrom !== undefined) {
     query.set("dateFrom", parsed.data.dateFrom);
   }
@@ -535,19 +731,9 @@ const createRecurringBookingSchema = z.object({
   endTime: z.string().regex(/^\d{2}:\d{2}$/),
   // Checkbox HTML: presente ("on") solo si el admin la marcó, ausente si no.
   requiresDeposit: z.literal("on").optional(),
+  bookingType: z.enum(["PARTICULAR", "TORNEO", "CLASE"]).optional(),
+  notes: z.string().trim().max(500).optional(),
 });
-
-// Todas las fechas semanales entre startDate y endDate (ambas inclusive), comparadas como string
-// "YYYY-MM-DD" — es válido porque ambas tienen el mismo formato de ancho fijo.
-function buildWeeklyOccurrenceDates(startDate: string, endDate: string): string[] {
-  const dates: string[] = [];
-  let current = startDate;
-  while (current <= endDate) {
-    dates.push(current);
-    current = addBusinessDays(current, 7);
-  }
-  return dates;
-}
 
 // Crea una reserva recurrente semanal (ej. "cliente fijo todos los martes 6pm"): el admin la
 // confirma directo, sin paso de pago online — el abono (si aplica) se cobra en persona y el admin
@@ -564,13 +750,25 @@ export async function createRecurringBooking(formData: FormData): Promise<void> 
     startTime: formData.get("startTime"),
     endTime: formData.get("endTime"),
     requiresDeposit: formData.get("requiresDeposit") ?? undefined,
+    bookingType: formData.get("bookingType") || undefined,
+    notes: formData.get("notes") || undefined,
   });
   if (!parsed.success) {
     notFound();
   }
 
-  const { venueId, customerName, customerPhone, startDate, endDate, startTime, endTime, requiresDeposit } =
-    parsed.data;
+  const {
+    venueId,
+    customerName,
+    customerPhone,
+    startDate,
+    endDate,
+    startTime,
+    endTime,
+    requiresDeposit,
+    bookingType,
+    notes,
+  } = parsed.data;
 
   const { session, orgSlug } = await requireAdminSession();
 
@@ -588,12 +786,21 @@ export async function createRecurringBooking(formData: FormData): Promise<void> 
     notFound();
   }
 
-  const venue = await db.venue.findUnique({ where: { id: venueId } });
-  if (!venue || venue.orgId !== org.id || !venue.active) {
+  const venue = await db.venue.findUnique({ where: { id: venueId }, include: { priceRules: true } });
+  if (!venue || venue.orgId !== org.id || venue.status !== "ACTIVA") {
     notFound();
   }
 
-  const depositAmount = requiresDeposit ? Math.round((venue.hourlyRate * org.depositPercentage) / 100) : 0;
+  // Todas las ocurrencias de la serie caen en el mismo día de la semana y usan el mismo startTime
+  // fijo (se repite semanalmente) — el precio es idéntico para todas, se resuelve una sola vez.
+  const price = resolveVenuePrice(venue, venue.priceRules, startDate, startTime);
+  const depositAmount = requiresDeposit ? Math.round((price * org.depositPercentage) / 100) : 0;
+
+  // No depende de la fecha — se calcula una vez fuera del loop de ocurrencias (ver nota en
+  // createBookingShell, lib/booking/actions.ts, sobre por qué cada ocurrencia debe reclamar su
+  // franja vía SlotLock incluso siendo una cancha atómica, para no dejar un hueco de doble reserva
+  // contra otra cancha combinada).
+  const unitIds = getVenueUnitIds(venue);
 
   try {
     await db.$transaction(async (tx) => {
@@ -607,12 +814,14 @@ export async function createRecurringBooking(formData: FormData): Promise<void> 
           endTime,
           startDate: businessDayStart(startDate),
           endDate: businessDayStart(endDate),
+          bookingType,
+          notes,
         },
       });
 
       for (const dateIso of occurrenceDates) {
         const dateObj = businessDayStart(dateIso);
-        await tx.booking.create({
+        const booking = await tx.booking.create({
           data: {
             orgId: org.id,
             venueId: venue.id,
@@ -624,10 +833,15 @@ export async function createRecurringBooking(formData: FormData): Promise<void> 
             endTime,
             status: BookingStatus.CONFIRMADA,
             blockingSlotKey: computeBlockingSlotKey(venue.id, dateObj, startTime),
-            totalAmount: venue.hourlyRate,
+            totalAmount: price,
             depositAmount,
+            bookingType,
+            notes,
           },
         });
+        for (const key of buildSlotLockKeys(unitIds, dateObj, startTime)) {
+          await tx.slotLock.create({ data: { key, bookingId: booking.id } });
+        }
       }
     });
   } catch (error) {
@@ -646,6 +860,123 @@ export async function createRecurringBooking(formData: FormData): Promise<void> 
   });
 
   redirect(`/admin/reservas?dateFrom=${startDate}&dateTo=${startDate}&recurrente=creada`);
+}
+
+const createBookingSchema = z.object({
+  venueId: z.string().min(1),
+  customerName: z.string().trim().min(2).max(200),
+  customerPhone: z.string().trim().min(7).max(50),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  startTime: z.string().regex(/^\d{2}:00$/), // hora en punto — mismo grid de 1h fijo del resto de la app
+  status: z.enum(["CONFIRMADA", "PENDIENTE_PAGO"]),
+  // Toggle "Pendiente" / "Pagado" del drawer — decide si depositAmount queda parcial (según el % de
+  // abono de la organización) o si la reserva queda saldada de una vez (igual que el walk-in de POS).
+  paymentToggle: z.enum(["pendiente", "pagado"]),
+  bookingType: z.enum(["PARTICULAR", "TORNEO", "CLASE"]).optional(),
+  notes: z.string().trim().max(500).optional(),
+});
+
+function slotEndTime(startTime: string): string {
+  const hour = Number(startTime.slice(0, 2));
+  return `${String(hour + 1).padStart(2, "0")}:00`;
+}
+
+// Reserva individual creada por el admin desde el drawer "Nueva reserva" de /admin/reservas —
+// equivalente admin de createWalkInBooking (lib/pos/actions.ts), que hoy solo vive en el flujo de
+// POS/caja. Duración fija de 1 hora, igual que el resto del sistema (ver decisión de producto:
+// ningún flujo de reserva soporta hoy turnos de varias horas sin construir bloqueo multi-hora nuevo).
+export async function createBooking(formData: FormData): Promise<void> {
+  const parsed = createBookingSchema.safeParse({
+    venueId: formData.get("venueId"),
+    customerName: formData.get("customerName"),
+    customerPhone: formData.get("customerPhone"),
+    date: formData.get("date"),
+    startTime: formData.get("startTime"),
+    status: formData.get("status"),
+    paymentToggle: formData.get("paymentToggle"),
+    bookingType: formData.get("bookingType") || undefined,
+    notes: formData.get("notes") || undefined,
+  });
+  if (
+    !parsed.success ||
+    !isValidCustomerName(parsed.data.customerName) ||
+    !isValidCustomerPhone(parsed.data.customerPhone)
+  ) {
+    redirect("/admin/reservas?nueva=1&error=datos_invalidos");
+  }
+
+  const { venueId, customerName, customerPhone, date, startTime, status, paymentToggle, bookingType, notes } =
+    parsed.data;
+
+  const hour = Number(startTime.slice(0, 2));
+  if (hour < OPENING_HOUR || hour >= CLOSING_HOUR) {
+    redirect("/admin/reservas?nueva=1&error=datos_invalidos");
+  }
+
+  const { session, orgSlug } = await requireAdminSession();
+
+  const org = await db.organization.findUnique({ where: { slug: orgSlug } });
+  if (!org) {
+    notFound();
+  }
+
+  const venue = await db.venue.findUnique({ where: { id: venueId }, include: { priceRules: true } });
+  if (!venue || venue.orgId !== org.id || venue.status !== "ACTIVA") {
+    notFound();
+  }
+
+  const dateObj = businessDayStart(date);
+  const endTime = slotEndTime(startTime);
+  const price = resolveVenuePrice(venue, venue.priceRules, date, startTime);
+  const depositAmount =
+    paymentToggle === "pagado" ? price : Math.round((price * org.depositPercentage) / 100);
+
+  const bookingData = {
+    orgId: org.id,
+    venueId: venue.id,
+    customerName,
+    customerPhone,
+    date: dateObj,
+    startTime,
+    endTime,
+    status: BookingStatus[status],
+    blockingSlotKey: computeBlockingSlotKey(venue.id, dateObj, startTime),
+    totalAmount: price,
+    depositAmount,
+    bookingType,
+    notes,
+  };
+
+  // Reclama la franja física de esta cancha y, si combina con otras (ver Venue.linkedVenueIds y
+  // lib/booking/slot-locks.ts), también las de esas — siempre en transacción, sin importar si es
+  // atómica o compuesta (ver nota en createBookingShell, lib/booking/actions.ts, sobre por qué
+  // saltarse esto para canchas atómicas dejaba un hueco real de doble reserva).
+  const unitIds = getVenueUnitIds(venue);
+  const slotLockKeys = buildSlotLockKeys(unitIds, dateObj, startTime);
+
+  try {
+    await db.$transaction(async (tx) => {
+      const booking = await tx.booking.create({ data: bookingData });
+      for (const key of slotLockKeys) {
+        await tx.slotLock.create({ data: { key, bookingId: booking.id } });
+      }
+    });
+  } catch (error) {
+    if (isUniqueConstraintError(error)) {
+      redirect("/admin/reservas?nueva=1&error=cupo_no_disponible");
+    }
+    throw error;
+  }
+
+  await logAdminAction({
+    orgId: org.id,
+    actorUserId: session.user.id,
+    actorName: session.user.name,
+    action: "booking.create",
+    summary: `Creó reserva para ${customerName} en ${venue.name} el ${date} ${startTime}`,
+  });
+
+  redirect(`/admin/reservas?fecha=${date}&creada=1`);
 }
 
 const createUserSchema = z.object({

@@ -36,13 +36,11 @@ export function AvailabilityGrid({
   orgSlug,
   venueId,
   dateIso,
-  hourlyRate,
   initialSlots,
 }: {
   orgSlug: string;
   venueId: string;
   dateIso: string;
-  hourlyRate: number;
   initialSlots: HourSlot[];
 }) {
   const router = useRouter();
@@ -147,7 +145,7 @@ export function AvailabilityGrid({
               <div className="font-medium text-gray-900">
                 {dateIso} · {selected.startTime} - {selected.endTime}
               </div>
-              <div className="text-gray-500">${hourlyRate.toLocaleString("es-CO")}</div>
+              <div className="text-gray-500">${selected.price.toLocaleString("es-CO")}</div>
             </div>
             <button
               type="button"

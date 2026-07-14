@@ -12,26 +12,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-
-const STATUS_LABEL: Record<string, string> = {
-  PENDIENTE_PAGO: "Pendiente de pago",
-  CONFIRMADA: "Confirmada",
-  EN_CURSO: "En curso",
-  FINALIZADA: "Cobrada",
-  CANCELADA: "Cancelada",
-  NO_SHOW: "No-show",
-  EXPIRADA: "Expirada",
-};
-
-const STATUS_COLOR: Record<string, string> = {
-  PENDIENTE_PAGO: "#f59e0b",
-  CONFIRMADA: "#059669",
-  EN_CURSO: "#3b82f6",
-  FINALIZADA: "#6b7280",
-  CANCELADA: "#ef4444",
-  NO_SHOW: "#b91c1c",
-  EXPIRADA: "#9ca3af",
-};
+import { STATUS_COLOR, STATUS_LABEL } from "@/lib/booking/status-display";
 
 function currency(value: number): string {
   return `$${value.toLocaleString("es-CO")}`;

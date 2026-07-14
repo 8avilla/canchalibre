@@ -1,6 +1,7 @@
 import { db } from "@/lib/db";
 import { addBusinessDays, businessDayRange, businessDayStart, todayBusinessDate } from "@/lib/time/business-day";
 import { BookingStatus, computeBlockingSlotKey } from "./state-machine";
+import { resolveVenuePrice } from "./pricing";
 import { getVenueUnitIds } from "./slot-locks";
 
 // MVP: horario fijo de operación. Cuando haya un panel de administración (Fase 4), esto pasa a ser
@@ -15,6 +16,9 @@ export interface HourSlot {
   // Motivo por el que no está disponible: reservado por un cliente, o bloqueado por el admin
   // (mantenimiento). Solo tiene valor cuando available es false.
   blockedReason?: "reservado" | "mantenimiento";
+  // Precio real de este turno (tarifa por defecto o excepción vigente) — solo informativo, el
+  // servidor siempre vuelve a resolverlo al crear la reserva.
+  price: number;
 }
 
 function formatHour(hour: number): string {
@@ -36,7 +40,10 @@ export async function getDaySlots(venueId: string, dateIso: string): Promise<Hou
   // disponibilidad de esta cancha depende también de las franjas físicas que ocupa — su propia
   // franja si es atómica, o las de linkedVenueIds si es compuesta (ver lib/booking/slot-locks.ts).
   // Para una cancha normal (el caso de siempre) unitIds = [venueId] y esto no cambia nada.
-  const venue = await db.venue.findUnique({ where: { id: venueId }, select: { id: true, linkedVenueIds: true } });
+  const venue = await db.venue.findUnique({
+    where: { id: venueId },
+    select: { id: true, linkedVenueIds: true, hourlyRate: true, priceRules: true },
+  });
   const unitIds = venue ? getVenueUnitIds(venue) : [venueId];
 
   const dateObj = businessDayStart(dateIso);
@@ -86,6 +93,7 @@ export async function getDaySlots(venueId: string, dateIso: string): Promise<Hou
       endTime: formatHour(hour + 1),
       available: !isTaken && !isMaintenance,
       blockedReason: isMaintenance ? "mantenimiento" : isTaken ? "reservado" : undefined,
+      price: venue ? resolveVenuePrice(venue, venue.priceRules, dateIso, startTime) : 0,
     });
   }
 

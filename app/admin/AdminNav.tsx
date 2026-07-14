@@ -10,6 +10,15 @@ export type AdminNavItem = {
   icon: string;
 };
 
+function getInitials(name: string): string {
+  return name
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() ?? "")
+    .join("");
+}
+
 // Un solo componente cliente (necesita usePathname para el estado activo) usado dos veces: sidebar
 // fijo en desktop, barra horizontal deslizable en mobile — mismo dato, dos layouts vía CSS
 // responsive en vez de duplicar el árbol de links a mano.
@@ -45,13 +54,25 @@ function NavLinks({
 
 const BASE_PATH = "/admin";
 
-export function AdminNav({ items }: { items: AdminNavItem[] }) {
+export function AdminNav({
+  items,
+  userName,
+  orgName,
+  isSuperadmin,
+  logoutAction,
+}: {
+  items: AdminNavItem[];
+  userName: string;
+  orgName: string;
+  isSuperadmin: boolean;
+  logoutAction: () => Promise<void>;
+}) {
   const activeClass = "bg-emerald-50 text-emerald-700";
   const inactiveClass = "text-gray-600 hover:bg-gray-50 hover:text-gray-900";
 
   return (
     <>
-      {/* Sidebar fijo en desktop, con el logo arriba */}
+      {/* Sidebar fijo en desktop, con el logo arriba y el perfil al pie */}
       <div
         className="hidden md:sticky md:top-0 md:flex md:h-screen md:w-56 md:flex-shrink-0 md:flex-col
           md:border-r md:border-gray-200 md:bg-white"
@@ -67,6 +88,26 @@ export function AdminNav({ items }: { items: AdminNavItem[] }) {
             `flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium ${isActive ? activeClass : inactiveClass}`
           }
         />
+
+        <div className="mt-auto flex items-center gap-2 border-t border-gray-100 p-3">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-sm font-semibold text-emerald-700">
+            {getInitials(userName || "?")}
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-medium text-gray-900">{userName}</p>
+            <p className="truncate text-xs text-gray-500">{orgName}</p>
+            {isSuperadmin && (
+              <Link href="/superadmin" className="text-xs text-emerald-700 underline">
+                ← Cambiar organización
+              </Link>
+            )}
+          </div>
+          <form action={logoutAction}>
+            <button type="submit" className="shrink-0 text-xs text-gray-400 underline hover:text-gray-600">
+              Salir
+            </button>
+          </form>
+        </div>
       </div>
 
       {/* Barra horizontal en mobile */}

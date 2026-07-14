@@ -6,15 +6,6 @@ import { getAdminAlertCounts } from "@/lib/admin/queries";
 import { requireAdminSession } from "@/lib/auth/session-guards";
 import { AdminNav, type AdminNavItem } from "./AdminNav";
 
-function getInitials(name: string): string {
-  return name
-    .trim()
-    .split(/\s+/)
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase() ?? "")
-    .join("");
-}
-
 const NAV_ITEMS: AdminNavItem[] = [
   { href: "", label: "Dashboard", icon: "🏠" },
   { href: "/reportes", label: "Reportes", icon: "📊" },
@@ -42,7 +33,13 @@ export default async function AdminLayout({ children }: { children: React.ReactN
 
   return (
     <div className="min-h-screen bg-gray-50 md:flex">
-      <AdminNav items={NAV_ITEMS} />
+      <AdminNav
+        items={NAV_ITEMS}
+        userName={session.user.name ?? "?"}
+        orgName={organization?.name ?? orgSlug}
+        isSuperadmin={isSuperadmin}
+        logoutAction={logoutAction}
+      />
 
       <div className="min-w-0 flex-1">
         <header className="flex items-center gap-3 border-b border-gray-200 bg-white px-4 py-2.5">
@@ -76,28 +73,13 @@ export default async function AdminLayout({ children }: { children: React.ReactN
             )}
           </Link>
 
-          <div className="flex shrink-0 items-center gap-2 border-l border-gray-200 pl-3">
-            <div
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-100
-                text-sm font-semibold text-emerald-700"
-            >
-              {getInitials(session.user.name ?? "?")}
-            </div>
-            <div className="hidden min-w-0 sm:block">
-              <p className="truncate text-sm font-medium text-gray-900">{session.user.name}</p>
-              <p className="truncate text-xs text-gray-500">{organization?.name ?? orgSlug}</p>
-              {isSuperadmin && (
-                <Link href="/superadmin" className="text-xs text-emerald-700 underline">
-                  ← Cambiar organización
-                </Link>
-              )}
-            </div>
-            <form action={logoutAction}>
-              <button type="submit" className="ml-1 shrink-0 text-xs text-gray-400 underline hover:text-gray-600">
-                Salir
-              </button>
-            </form>
-          </div>
+          {/* En desktop el "Salir" vive en el perfil al pie del sidebar (AdminNav) — ese sidebar no
+              se muestra en mobile, así que acá queda un acceso equivalente compacto. */}
+          <form action={logoutAction} className="md:hidden">
+            <button type="submit" className="shrink-0 text-xs text-gray-400 underline hover:text-gray-600">
+              Salir
+            </button>
+          </form>
         </header>
 
         {children}

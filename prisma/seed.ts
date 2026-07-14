@@ -5,11 +5,11 @@ const SEED_PASSWORD = "sportarena123";
 
 async function main() {
   const organization = await db.organization.upsert({
-    where: { slug: "aremagol" },
+    where: { slug: "cunadelgol" },
     update: {},
     create: {
-      slug: "aremagol",
-      name: "Arena Gol",
+      slug: "cunadelgol",
+      name: "La Cuna del Gol",
       timezone: "America/Bogota",
       depositPercentage: 50,
       cancellationWindowHours: 24,

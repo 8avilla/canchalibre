@@ -7,6 +7,7 @@ import { requireStaffSession } from "@/lib/auth/session-guards";
 import { logAdminAction } from "@/lib/admin/audit";
 import { confirmBookingPayment } from "@/lib/booking/actions";
 import { OPENING_HOUR, CLOSING_HOUR } from "@/lib/booking/availability";
+import { resolveVenuePrice } from "@/lib/booking/pricing";
 import { NotificationService } from "@/lib/notifications";
 import {
   BookingStatus,
@@ -105,13 +106,14 @@ export async function createWalkInBooking(formData: FormData): Promise<void> {
     notFound();
   }
 
-  const venue = await db.venue.findUnique({ where: { id: venueId } });
-  if (!venue || venue.orgId !== org.id || !venue.active) {
+  const venue = await db.venue.findUnique({ where: { id: venueId }, include: { priceRules: true } });
+  if (!venue || venue.orgId !== org.id || venue.status !== "ACTIVA") {
     notFound();
   }
 
   const dateObj = businessDayStart(date);
   const endTime = slotEndTime(startTime);
+  const price = resolveVenuePrice(venue, venue.priceRules, date, startTime);
 
   const walkInData = {
     orgId: org.id,
@@ -123,27 +125,24 @@ export async function createWalkInBooking(formData: FormData): Promise<void> {
     endTime,
     status: BookingStatus.CONFIRMADA,
     blockingSlotKey: computeBlockingSlotKey(venue.id, dateObj, startTime),
-    totalAmount: venue.hourlyRate,
-    depositAmount: venue.hourlyRate, // pagado de contado en persona, sin saldo pendiente
+    totalAmount: price,
+    depositAmount: price, // pagado de contado en persona, sin saldo pendiente
   };
 
-  // Cancha combinable (ver Venue.linkedVenueIds y lib/booking/slot-locks.ts) — mismo mecanismo que
-  // createBookingShell (flujo público).
+  // Reclama la franja física de esta cancha y, si combina con otras (ver Venue.linkedVenueIds y
+  // lib/booking/slot-locks.ts), también las de esas — siempre en transacción, sin importar si es
+  // atómica o compuesta (ver nota en createBookingShell, lib/booking/actions.ts, sobre por qué
+  // saltarse esto para canchas atómicas dejaba un hueco real de doble reserva).
   const unitIds = getVenueUnitIds(venue);
-  const isCombinable = !(unitIds.length === 1 && unitIds[0] === venue.id);
+  const slotLockKeys = buildSlotLockKeys(unitIds, dateObj, startTime);
 
   try {
-    if (!isCombinable) {
-      await db.booking.create({ data: walkInData });
-    } else {
-      const slotLockKeys = buildSlotLockKeys(unitIds, dateObj, startTime);
-      await db.$transaction(async (tx) => {
-        const booking = await tx.booking.create({ data: walkInData });
-        for (const key of slotLockKeys) {
-          await tx.slotLock.create({ data: { key, bookingId: booking.id } });
-        }
-      });
-    }
+    await db.$transaction(async (tx) => {
+      const booking = await tx.booking.create({ data: walkInData });
+      for (const key of slotLockKeys) {
+        await tx.slotLock.create({ data: { key, bookingId: booking.id } });
+      }
+    });
   } catch (error) {
     if (isUniqueConstraintError(error)) {
       redirect(`/${orgSlug}/pos?error=cupo_no_disponible`);
