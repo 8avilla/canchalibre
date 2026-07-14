@@ -57,7 +57,7 @@ export function AdminNav({ items }: { items: AdminNavItem[] }) {
           md:border-r md:border-gray-200 md:bg-white"
       >
         <Link href="/admin" className="flex items-center border-b border-gray-100 px-4 py-4">
-          <Image src="/logo.png" alt="Cancha Libre" width={1774} height={887} className="h-7 w-auto" priority />
+          <Image src="/logo.png" alt="Cancha Libre" width={1774} height={887} className="h-9 w-auto" priority />
         </Link>
         <NavLinks
           items={items}

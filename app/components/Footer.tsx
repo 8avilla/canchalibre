@@ -11,7 +11,7 @@ export function Footer() {
         alt="Cancha Libre"
         width={1774}
         height={887}
-        className="mx-auto h-6 w-auto opacity-80"
+        className="mx-auto h-8 w-auto opacity-80"
       />
       <p className="mt-3 text-xs text-gray-500">© {new Date().getFullYear()} Cancha Libre</p>
     </footer>

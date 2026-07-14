@@ -15,7 +15,7 @@ export default async function LoginPage({
 
   return (
     <main className="mx-auto max-w-sm px-4 py-16">
-      <Image src="/logo.png" alt="Cancha Libre" width={1774} height={887} className="h-9 w-auto" priority />
+      <Image src="/logo.png" alt="Cancha Libre" width={1774} height={887} className="h-11 w-auto" priority />
       <h1 className="mt-6 text-xl font-semibold">Ingreso de personal</h1>
       <p className="mt-1 text-sm text-gray-500">Recepción y administración de Cancha Libre.</p>
 
