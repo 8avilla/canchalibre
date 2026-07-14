@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { BookingStatus, CancelledBy, computeReleasedSlotKey } from "@/lib/booking/state-machine";
+import { releaseSlotLocks } from "@/lib/booking/slot-locks";
 import { businessDateTimeInstant, businessDayStart, todayBusinessDate } from "@/lib/time/business-day";
 
 // negocio.md §6.1/§6.2: "no_show: Hora llegada, el grupo nunca se presentó ni canceló... la reserva
@@ -27,8 +28,8 @@ export async function GET(request: Request): Promise<Response> {
   );
 
   await Promise.all(
-    overdue.map((booking) =>
-      db.booking.update({
+    overdue.map(async (booking) => {
+      await db.booking.update({
         where: { id: booking.id },
         data: {
           status: BookingStatus.NO_SHOW,
@@ -37,8 +38,9 @@ export async function GET(request: Request): Promise<Response> {
           cancelledBy: CancelledBy.SYSTEM,
           cancellationReason: "no_show",
         },
-      }),
-    ),
+      });
+      await releaseSlotLocks(booking.id);
+    }),
   );
 
   return NextResponse.json({ noShow: overdue.length });

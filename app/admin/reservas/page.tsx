@@ -6,6 +6,7 @@ import { requireAdminSession } from "@/lib/auth/session-guards";
 import { BookingStatus } from "@/lib/booking/state-machine";
 import { businessDayRange, todayBusinessDate } from "@/lib/time/business-day";
 import { Prisma, VenueType } from "@/lib/generated/prisma";
+import { VENUE_TYPE_LABEL } from "@/lib/venues/type-info";
 import { SubmitButton } from "@/app/components/SubmitButton";
 
 const STATUS_LABEL: Record<string, string> = {
@@ -27,12 +28,6 @@ const STATUS_BADGE_STYLE: Record<string, string> = {
   CANCELADA: "bg-red-50 text-red-700 ring-1 ring-inset ring-red-200",
   NO_SHOW: "bg-red-50 text-red-700 ring-1 ring-inset ring-red-200",
   EXPIRADA: "bg-gray-100 text-gray-500 ring-1 ring-inset ring-gray-200",
-};
-
-const VENUE_TYPE_LABEL: Record<string, string> = {
-  FUTBOL_5: "Fútbol 5",
-  FUTBOL_8: "Fútbol 8",
-  PADEL: "Pádel",
 };
 
 const RECURRING_ERROR_MESSAGES: Record<string, string> = {

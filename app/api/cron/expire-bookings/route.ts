@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { BookingStatus, computeReleasedSlotKey } from "@/lib/booking/state-machine";
+import { releaseSlotLocks } from "@/lib/booking/slot-locks";
 
 // Pensado para Vercel Cron (llama por GET con `Authorization: Bearer $CRON_SECRET`), pero cualquier
 // scheduler externo sirve mientras mande ese header.
@@ -22,12 +23,13 @@ export async function GET(request: Request): Promise<Response> {
   });
 
   await Promise.all(
-    expiredCandidates.map((booking) =>
-      db.booking.update({
+    expiredCandidates.map(async (booking) => {
+      await db.booking.update({
         where: { id: booking.id },
         data: { status: BookingStatus.EXPIRADA, blockingSlotKey: computeReleasedSlotKey(booking.id) },
-      }),
-    ),
+      });
+      await releaseSlotLocks(booking.id);
+    }),
   );
 
   return NextResponse.json({ expired: expiredCandidates.length });

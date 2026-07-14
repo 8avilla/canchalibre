@@ -6,6 +6,7 @@ import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { ADMIN_ORG_COOKIE, requireAdminSession } from "@/lib/auth/session-guards";
 import { notifyBookingCancelled } from "@/lib/booking/actions";
+import { releaseSlotLocks } from "@/lib/booking/slot-locks";
 import {
   BookingStatus,
   CancelledBy,
@@ -35,7 +36,7 @@ async function resolveOrgId(orgSlug: string): Promise<string> {
 
 const createVenueSchema = z.object({
   name: z.string().trim().min(2),
-  type: z.enum(["FUTBOL_5", "FUTBOL_8", "PADEL"]),
+  type: z.enum(["FUTBOL_5", "FUTBOL_7", "FUTBOL_8", "FUTBOL_9", "PADEL"]),
   hourlyRate: z.coerce.number().int().min(0),
 });
 
@@ -79,6 +80,7 @@ const updateVenueSchema = z.object({
   // un campo vacío se guardaría como capacity=0 en vez de quedar sin definir.
   capacity: z.literal("").transform(() => undefined).or(z.coerce.number().int().min(0)),
   active: z.enum(["true", "false"]),
+  linkedVenueIds: z.array(z.string()).default([]),
 });
 
 // Fotos: input de archivo real (Azure Blob, mismo patrón que uploadOrganizationLogo) en vez del
@@ -91,6 +93,7 @@ export async function updateVenue(formData: FormData): Promise<void> {
     hourlyRate: formData.get("hourlyRate"),
     capacity: formData.get("capacity"),
     active: formData.get("active"),
+    linkedVenueIds: formData.getAll("linkedVenueIds"),
   });
   if (!parsed.success) {
     notFound();
@@ -103,6 +106,18 @@ export async function updateVenue(formData: FormData): Promise<void> {
   if (!venue) {
     notFound();
   }
+
+  // Solo se permite combinar con otras canchas de la MISMA organización (nunca consigo misma) —
+  // valida el formulario contra manipulación (ver Venue.linkedVenueIds, canchas combinables).
+  const validSiblingIds = new Set(
+    (
+      await db.venue.findMany({
+        where: { orgId: venue.orgId, id: { in: parsed.data.linkedVenueIds, not: venueId } },
+        select: { id: true },
+      })
+    ).map((v) => v.id),
+  );
+  const linkedVenueIds = parsed.data.linkedVenueIds.filter((id) => validSiblingIds.has(id));
 
   const removePhotos = new Set(formData.getAll("removePhotos").map(String));
   const keptPhotos = venue.imageUrls.filter((url) => !removePhotos.has(url));
@@ -141,6 +156,7 @@ export async function updateVenue(formData: FormData): Promise<void> {
       imageUrls: [...keptPhotos, ...uploadedUrls],
       capacity: parsed.data.capacity ?? null,
       active: parsed.data.active === "true",
+      linkedVenueIds,
     },
   });
 
@@ -466,6 +482,7 @@ export async function cancelConfirmedBooking(formData: FormData): Promise<void> 
       cancellationReason: outcome.reason,
     },
   });
+  await releaseSlotLocks(booking.id);
 
   if (organization) {
     await notifyBookingCancelled(booking, organization, outcome);

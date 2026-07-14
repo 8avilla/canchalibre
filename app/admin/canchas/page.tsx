@@ -4,12 +4,7 @@ import { createVenue, updateVenue } from "@/lib/admin/actions";
 import { requireAdminSession } from "@/lib/auth/session-guards";
 import { getVenuePhotos } from "@/lib/venues/photos";
 import { Banner } from "@/app/admin/Banner";
-
-const VENUE_TYPE_LABEL: Record<string, string> = {
-  FUTBOL_5: "Fútbol 5",
-  FUTBOL_8: "Fútbol 8",
-  PADEL: "Pádel",
-};
+import { VENUE_TYPE_LABEL } from "@/lib/venues/type-info";
 
 const ERROR_MESSAGES: Record<string, string> = {
   foto_formato_invalido: "Formato de foto no soportado. Usa PNG, JPG o WEBP.",
@@ -31,6 +26,16 @@ export default async function CanchasPage({
   }
 
   const venues = await db.venue.findMany({ where: { orgId: organization.id }, orderBy: { name: "asc" } });
+
+  // "Combina con" es de doble vía: si A lista a B en linkedVenueIds, a B le mostramos "Combina con:
+  // A" de solo lectura — así el admin no termina editando el campo en la cancha equivocada. No tiene
+  // nada que ver con VenueType: cualquier cancha se puede combinar con cualquier otra.
+  const referencedBy = new Map<string, string[]>();
+  for (const venue of venues) {
+    for (const linkedId of venue.linkedVenueIds) {
+      referencedBy.set(linkedId, [...(referencedBy.get(linkedId) ?? []), venue.name]);
+    }
+  }
 
   return (
     <main className="px-6 py-10">
@@ -98,6 +103,39 @@ export default async function CanchasPage({
                   />
                 </div>
 
+                <div>
+                  <span className="text-sm font-medium text-gray-700">Esta cancha combina con</span>
+                  <p className="text-xs text-gray-500">
+                    Marca las canchas que comparten el mismo espacio físico — reservar esta cancha
+                    bloqueará esas, y reservar cualquiera de esas bloqueará esta (ej. una cancha de
+                    Fútbol 9 que también se usa como 2 de Fútbol 7).
+                  </p>
+                  {venues.filter((v) => v.id !== venue.id).length === 0 ? (
+                    <p className="mt-2 text-xs text-gray-400">No hay otras canchas todavía.</p>
+                  ) : (
+                    <div className="mt-2 flex flex-wrap gap-3">
+                      {venues
+                        .filter((v) => v.id !== venue.id)
+                        .map((other) => (
+                          <label key={other.id} className="flex items-center gap-1.5 text-sm">
+                            <input
+                              type="checkbox"
+                              name="linkedVenueIds"
+                              value={other.id}
+                              defaultChecked={venue.linkedVenueIds.includes(other.id)}
+                            />
+                            {other.name} ({VENUE_TYPE_LABEL[other.type]})
+                          </label>
+                        ))}
+                    </div>
+                  )}
+                  {referencedBy.get(venue.id) && (
+                    <p className="mt-2 text-xs text-gray-500">
+                      Combina con: {referencedBy.get(venue.id)!.join(", ")} (definido desde esa cancha)
+                    </p>
+                  )}
+                </div>
+
                 <div className="flex flex-wrap items-end gap-3">
                   <label className="grid gap-1 text-sm">
                     Tarifa/hora
@@ -155,7 +193,9 @@ export default async function CanchasPage({
           Tipo
           <select name="type" required className="rounded-md border border-gray-300 px-3 py-3">
             <option value="FUTBOL_5">Fútbol 5</option>
+            <option value="FUTBOL_7">Fútbol 7</option>
             <option value="FUTBOL_8">Fútbol 8</option>
+            <option value="FUTBOL_9">Fútbol 9</option>
             <option value="PADEL">Pádel</option>
           </select>
         </label>

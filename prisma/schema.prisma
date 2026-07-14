@@ -13,7 +13,9 @@ datasource db {
 
 enum VenueType {
   FUTBOL_5
+  FUTBOL_7
   FUTBOL_8
+  FUTBOL_9
   PADEL
 }
 
@@ -180,6 +182,12 @@ model Venue {
   capacity   Int?
   active     Boolean   @default(true)
 
+  // Canchas combinables (ej. una de Fútbol 9 que también se usa como 2 de Fútbol 7): esta cancha no
+  // tiene franja física propia, reclama las de las canchas listadas acá al reservarse (ver
+  // lib/booking/slot-locks.ts). Vacío en las canchas "atómicas" (F7-A, F7-B), que sí son dueñas de
+  // su propia franja.
+  linkedVenueIds String[] @default([])
+
   organization      Organization       @relation(fields: [orgId], references: [id])
   bookings          Booking[]
   slotBlocks        SlotBlock[]
@@ -292,6 +300,20 @@ model Booking {
 
   @@index([orgId, venueId, date])
   @@index([recurringBookingId])
+}
+
+// Reclamo de una franja física para una reserva — solo se usa para canchas combinables
+// (Venue.linkedVenueIds no vacío). Una cancha normal nunca genera filas acá. El índice único en
+// `key` es lo que hace imposible la condición de carrera entre, ej., una cancha de Fútbol 9 y las
+// 2 de Fútbol 7 en las que se puede dividir — igual que blockingSlotKey en Booking, nunca se
+// "chequea y luego escribe": se intenta escribir y Mongo rechaza el choque.
+model SlotLock {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  key       String   @unique // "<venueId>_<date>_<startTime>" — mismo formato que blockingSlotKey
+  bookingId String   @db.ObjectId
+  createdAt DateTime @default(now())
+
+  @@index([bookingId])
 }
 
 // Cuenta de cliente final (sin contraseña) — se crea sola apenas alguien completa nombre+WhatsApp en

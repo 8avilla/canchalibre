@@ -15,11 +15,12 @@ import type { VenueType } from "@/lib/generated/prisma";
 import type { MapOrganization } from "./OrganizationsMap";
 import styles from "./HomeSearch.module.css";
 
+// Deriva de lib/venues/type-info.ts en vez de tener su propia copia de labels/íconos — evita que un
+// tipo nuevo (ej. FUTBOL_7/FUTBOL_9) quede agregado ahí pero no acá, o viceversa.
+const TYPE_FILTER_ORDER: VenueType[] = ["FUTBOL_5", "FUTBOL_7", "FUTBOL_8", "FUTBOL_9", "PADEL"];
 const TYPE_FILTERS: { value: VenueType | ""; label: string }[] = [
   { value: "", label: "Todos los deportes" },
-  { value: "FUTBOL_5", label: "⚽ Fútbol 5" },
-  { value: "FUTBOL_8", label: "⚽ Fútbol 8" },
-  { value: "PADEL", label: "🎾 Pádel" },
+  ...TYPE_FILTER_ORDER.map((value) => ({ value, label: `${VENUE_TYPE_ICON[value]} ${VENUE_TYPE_LABEL[value]}` })),
 ];
 
 const SORT_OPTIONS = [

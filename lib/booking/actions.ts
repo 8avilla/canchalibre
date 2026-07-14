@@ -10,6 +10,7 @@ import { checkRateLimit, getClientIp } from "@/lib/security/rate-limit";
 import { buildCheckoutPayload, isBoldConfigured, type BoldCheckoutPayload } from "@/lib/payments/bold";
 import { getCustomerSession } from "@/lib/customer-auth/session";
 import { NotificationService } from "@/lib/notifications";
+import { buildSlotLockKeys, getVenueUnitIds, releaseSlotLocks } from "./slot-locks";
 import {
   BookingStatus,
   CancelledBy,
@@ -87,25 +88,43 @@ export async function createBookingShell(input: {
   const depositAmount = Math.round((venue.hourlyRate * org.depositPercentage) / 100);
   const expiresAt = new Date(Date.now() + org.bookingHoldMinutes * 60_000);
 
+  const bookingData = {
+    orgId: org.id,
+    venueId: venue.id,
+    customerName: "",
+    customerPhone: "",
+    date: dateObj,
+    startTime: data.startTime,
+    endTime: data.endTime,
+    status: BookingStatus.PENDIENTE_PAGO,
+    blockingSlotKey,
+    totalAmount: venue.hourlyRate,
+    depositAmount,
+    expiresAt,
+  };
+
+  // Cancha combinable (ej. Fútbol 9 armada sobre 2 de Fútbol 7, ver Venue.linkedVenueIds): además
+  // de su propia reserva, reclama la franja física de cada cancha con la que combina — todo o nada
+  // dentro de una transacción (mismo patrón que createRecurringBooking en lib/admin/actions.ts). Una
+  // cancha normal (el caso de siempre) sigue exactamente el mismo camino de antes, sin transacción.
+  const unitIds = getVenueUnitIds(venue);
+  const isCombinable = !(unitIds.length === 1 && unitIds[0] === venue.id);
+
   let bookingId: string;
   try {
-    const booking = await db.booking.create({
-      data: {
-        orgId: org.id,
-        venueId: venue.id,
-        customerName: "",
-        customerPhone: "",
-        date: dateObj,
-        startTime: data.startTime,
-        endTime: data.endTime,
-        status: BookingStatus.PENDIENTE_PAGO,
-        blockingSlotKey,
-        totalAmount: venue.hourlyRate,
-        depositAmount,
-        expiresAt,
-      },
-    });
-    bookingId = booking.id;
+    if (!isCombinable) {
+      const booking = await db.booking.create({ data: bookingData });
+      bookingId = booking.id;
+    } else {
+      const slotLockKeys = buildSlotLockKeys(unitIds, dateObj, data.startTime);
+      bookingId = await db.$transaction(async (tx) => {
+        const booking = await tx.booking.create({ data: bookingData });
+        for (const key of slotLockKeys) {
+          await tx.slotLock.create({ data: { key, bookingId: booking.id } });
+        }
+        return booking.id;
+      });
+    }
   } catch (error) {
     if (isUniqueConstraintError(error)) {
       return { ok: false, error: "cupo_no_disponible" };
@@ -280,6 +299,7 @@ export async function cancelBookingByCustomer(formData: FormData): Promise<void>
       cancellationReason: outcome.reason,
     },
   });
+  await releaseSlotLocks(booking.id);
 
   await notifyBookingCancelled(booking, organization, outcome);
 

@@ -1,6 +1,7 @@
 import { db } from "@/lib/db";
-import { addBusinessDays, businessDayRange, todayBusinessDate } from "@/lib/time/business-day";
-import { BookingStatus } from "./state-machine";
+import { addBusinessDays, businessDayRange, businessDayStart, todayBusinessDate } from "@/lib/time/business-day";
+import { BookingStatus, computeBlockingSlotKey } from "./state-machine";
+import { getVenueUnitIds } from "./slot-locks";
 
 // MVP: horario fijo de operación. Cuando haya un panel de administración (Fase 4), esto pasa a ser
 // configuración por Organization en vez de una constante.
@@ -31,7 +32,20 @@ export function todayIso(): string {
 export async function getDaySlots(venueId: string, dateIso: string): Promise<HourSlot[]> {
   const { start, end } = businessDayRange(dateIso);
 
-  const [blockingBookings, maintenanceBlocks] = await Promise.all([
+  // Canchas combinables (Venue.linkedVenueIds, ej. Fútbol 9 armado sobre 2 de Fútbol 7): la
+  // disponibilidad de esta cancha depende también de las franjas físicas que ocupa — su propia
+  // franja si es atómica, o las de linkedVenueIds si es compuesta (ver lib/booking/slot-locks.ts).
+  // Para una cancha normal (el caso de siempre) unitIds = [venueId] y esto no cambia nada.
+  const venue = await db.venue.findUnique({ where: { id: venueId }, select: { id: true, linkedVenueIds: true } });
+  const unitIds = venue ? getVenueUnitIds(venue) : [venueId];
+
+  const dateObj = businessDayStart(dateIso);
+  const allHours = Array.from({ length: CLOSING_HOUR - OPENING_HOUR }, (_, i) => formatHour(OPENING_HOUR + i));
+  const possibleLockKeys = unitIds.flatMap((unitId) =>
+    allHours.map((hour) => computeBlockingSlotKey(unitId, dateObj, hour)),
+  );
+
+  const [blockingBookings, maintenanceBlocks, slotLocks] = await Promise.all([
     // Ojo: PENDIENTE_PAGO NO cuenta aquí a propósito. La grilla pública sigue mostrando el horario
     // como disponible mientras alguien más está a mitad de pago — solo Bold confirmando (CONFIRMADA)
     // lo marca como ocupado de verdad. La protección real contra doble-reserva sigue siendo el índice
@@ -39,7 +53,7 @@ export async function getDaySlots(venueId: string, dateIso: string): Promise<Hou
     // muestra en pantalla.
     db.booking.findMany({
       where: {
-        venueId,
+        venueId: { in: unitIds },
         date: { gte: start, lt: end },
         status: { in: [BookingStatus.CONFIRMADA, BookingStatus.EN_CURSO] },
       },
@@ -49,9 +63,17 @@ export async function getDaySlots(venueId: string, dateIso: string): Promise<Hou
       where: { venueId, date: { gte: start, lt: end } },
       select: { startTime: true },
     }),
+    db.slotLock.findMany({
+      where: { key: { in: possibleLockKeys } },
+      select: { key: true },
+    }),
   ]);
 
   const takenStarts = new Set(blockingBookings.map((booking) => booking.startTime));
+  // El key de SlotLock termina siempre en "_HH:mm" (mismo formato que computeBlockingSlotKey).
+  for (const lock of slotLocks) {
+    takenStarts.add(lock.key.slice(-5));
+  }
   const maintenanceStarts = new Set(maintenanceBlocks.map((block) => block.startTime));
 
   const slots: HourSlot[] = [];

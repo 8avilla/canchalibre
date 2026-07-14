@@ -17,6 +17,7 @@ import {
   isValidCustomerName,
   isValidCustomerPhone,
 } from "@/lib/booking/state-machine";
+import { buildSlotLockKeys, getVenueUnitIds, releaseSlotLocks } from "@/lib/booking/slot-locks";
 import { businessDayStart } from "@/lib/time/business-day";
 
 const openShiftSchema = z.object({
@@ -112,22 +113,37 @@ export async function createWalkInBooking(formData: FormData): Promise<void> {
   const dateObj = businessDayStart(date);
   const endTime = slotEndTime(startTime);
 
+  const walkInData = {
+    orgId: org.id,
+    venueId: venue.id,
+    customerName,
+    customerPhone,
+    date: dateObj,
+    startTime,
+    endTime,
+    status: BookingStatus.CONFIRMADA,
+    blockingSlotKey: computeBlockingSlotKey(venue.id, dateObj, startTime),
+    totalAmount: venue.hourlyRate,
+    depositAmount: venue.hourlyRate, // pagado de contado en persona, sin saldo pendiente
+  };
+
+  // Cancha combinable (ver Venue.linkedVenueIds y lib/booking/slot-locks.ts) — mismo mecanismo que
+  // createBookingShell (flujo público).
+  const unitIds = getVenueUnitIds(venue);
+  const isCombinable = !(unitIds.length === 1 && unitIds[0] === venue.id);
+
   try {
-    await db.booking.create({
-      data: {
-        orgId: org.id,
-        venueId: venue.id,
-        customerName,
-        customerPhone,
-        date: dateObj,
-        startTime,
-        endTime,
-        status: BookingStatus.CONFIRMADA,
-        blockingSlotKey: computeBlockingSlotKey(venue.id, dateObj, startTime),
-        totalAmount: venue.hourlyRate,
-        depositAmount: venue.hourlyRate, // pagado de contado en persona, sin saldo pendiente
-      },
-    });
+    if (!isCombinable) {
+      await db.booking.create({ data: walkInData });
+    } else {
+      const slotLockKeys = buildSlotLockKeys(unitIds, dateObj, startTime);
+      await db.$transaction(async (tx) => {
+        const booking = await tx.booking.create({ data: walkInData });
+        for (const key of slotLockKeys) {
+          await tx.slotLock.create({ data: { key, bookingId: booking.id } });
+        }
+      });
+    }
   } catch (error) {
     if (isUniqueConstraintError(error)) {
       redirect(`/${orgSlug}/pos?error=cupo_no_disponible`);
@@ -215,6 +231,7 @@ export async function rejectManualReceipt(formData: FormData): Promise<void> {
       cancelledBy: session.user.role === "EMPLOYEE" ? CancelledBy.EMPLOYEE : CancelledBy.ADMIN,
     },
   });
+  await releaseSlotLocks(booking.id);
 
   redirect(`/${parsed.data.orgSlug}/pos`);
 }
@@ -317,6 +334,7 @@ export async function closeAccount(formData: FormData): Promise<void> {
     where: { id: booking.id },
     data: { status: BookingStatus.FINALIZADA, settlementMethod: parsed.data.settlementMethod },
   });
+  await releaseSlotLocks(booking.id);
 
   redirect(`/${parsed.data.orgSlug}/pos`);
 }
