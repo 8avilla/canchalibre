@@ -14,10 +14,11 @@ import {
   STATUS_BADGE_STYLE,
   STATUS_LABEL,
 } from "@/lib/booking/status-display";
-import { businessDayRange, formatBusinessDayLabel, addBusinessDays, todayBusinessDate } from "@/lib/time/business-day";
+import { businessDayRange, formatBusinessDayLabel, todayBusinessDate } from "@/lib/time/business-day";
 import { Prisma, VenueType } from "@/lib/generated/prisma";
 import { VENUE_TYPE_ICON, VENUE_TYPE_LABEL } from "@/lib/venues/type-info";
 import { SubmitButton } from "@/app/components/SubmitButton";
+import { AgendaDateNav } from "./AgendaDateNav";
 import { AgendaGrid } from "./AgendaGrid";
 import { BookingsTable, BOOKING_LIST_LIMIT } from "./BookingsTable";
 import { NuevaReservaButton } from "./NuevaReservaButton";
@@ -253,25 +254,7 @@ export default async function AdminReservasPage({
 
       {vista === "agenda" && (
         <div className="mt-4 flex flex-wrap items-center gap-3">
-          <div className="flex items-center gap-1 rounded-md border border-gray-300 bg-white px-2 py-1.5">
-            <Link
-              href={`/admin/reservas?vista=agenda&fecha=${addBusinessDays(fecha, -1)}`}
-              aria-label="Día anterior"
-              className="px-1.5 text-gray-400 hover:text-gray-700"
-            >
-              ‹
-            </Link>
-            <span className="px-1 text-sm font-medium text-gray-700 capitalize">
-              📅 {isToday ? "Hoy" : weekday}, {day} {month}
-            </span>
-            <Link
-              href={`/admin/reservas?vista=agenda&fecha=${addBusinessDays(fecha, 1)}`}
-              aria-label="Día siguiente"
-              className="px-1.5 text-gray-400 hover:text-gray-700"
-            >
-              ›
-            </Link>
-          </div>
+          <AgendaDateNav fecha={fecha} isToday={isToday} weekday={weekday} day={day} month={month} />
 
           <details className="group relative ml-auto">
             <summary className="flex cursor-pointer list-none items-center gap-1.5 rounded-md border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 [&::-webkit-details-marker]:hidden">

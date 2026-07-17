@@ -4,6 +4,7 @@ import { BookingStatus } from "@/lib/booking/state-machine";
 import { getPaymentState, PAYMENT_STATE_BADGE_STYLE, PAYMENT_STATE_LABEL, STATUS_BADGE_STYLE, STATUS_LABEL } from "@/lib/booking/status-display";
 import { VENUE_TYPE_LABEL } from "@/lib/venues/type-info";
 import { SubmitButton } from "@/app/components/SubmitButton";
+import { DateRangeFilterFields } from "./DateRangeFilterFields";
 
 // Tope defensivo para "todas las reservas" sin filtro de fecha — evita traer miles de documentos si
 // el negocio lleva años operando. No es paginación real (nadie necesita hojear reservas viejas de a
@@ -86,15 +87,7 @@ export function BookingsTable({
         method="get"
         className="grid grid-cols-2 gap-3 rounded-lg border border-gray-200 bg-gray-50 p-4 sm:grid-cols-4 lg:grid-cols-7"
       >
-        <div>
-          <label className="block text-xs font-medium text-gray-500">📅 Desde</label>
-          <input type="date" name="dateFrom" defaultValue={filters.dateFrom ?? ""} className={INPUT_CLASS} />
-        </div>
-
-        <div>
-          <label className="block text-xs font-medium text-gray-500">📅 Hasta</label>
-          <input type="date" name="dateTo" defaultValue={filters.dateTo ?? ""} className={INPUT_CLASS} />
-        </div>
+        <DateRangeFilterFields dateFrom={filters.dateFrom} dateTo={filters.dateTo} />
 
         <div>
           <label className="block text-xs font-medium text-gray-500">🏟️ Cancha</label>

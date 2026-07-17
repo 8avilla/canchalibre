@@ -5,6 +5,7 @@ import { createBooking, searchCustomers, type CustomerSuggestion } from "@/lib/a
 import { CLOSING_HOUR, OPENING_HOUR } from "@/lib/booking/availability";
 import { resolveVenuePrice, type VenuePriceRuleLike } from "@/lib/booking/pricing";
 import { SubmitButton } from "@/app/components/SubmitButton";
+import { CalendarDateField } from "./CalendarDateField";
 
 export interface VenueForBooking {
   id: string;
@@ -142,17 +143,10 @@ export function NuevaReservaDrawer({
           </label>
 
           <div className="grid grid-cols-2 gap-3">
-            <label className="text-sm font-medium text-gray-700">
+            <div className="text-sm font-medium text-gray-700">
               Fecha *
-              <input
-                type="date"
-                name="date"
-                required
-                value={date}
-                onChange={(e) => setDate(e.target.value)}
-                className={INPUT_CLASS}
-              />
-            </label>
+              <CalendarDateField name="date" value={date} onChange={setDate} required />
+            </div>
             <label className="text-sm font-medium text-gray-700">
               Hora inicio *
               <select
